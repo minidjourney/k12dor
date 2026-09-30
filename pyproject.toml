@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools==83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "k12-commerce-mcp"
+version = "0.1.0"
+description = "K12 read-only commerce normalization MCP server"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "httpx==0.28.1",
+  "mcp==2.2.0",
+  "pydantic==2.13.4",
+  "starlette==1.3.1",
+  "uvicorn==0.52.4",
+]
+
+[project.scripts]
+k12-commerce-mcp = "k12_commerce_mcp.server:main"
+k12-commerce-mcp-mock = "k12_commerce_mcp.server:mock_main"
+k12-commerce-mcp-11st-public = "k12_commerce_mcp.server:public_elevenst_main"
+k12-commerce-mcp-remote = "k12_commerce_mcp.remote:main"
+
+[dependency-groups]
+dev = [
+  "pytest==9.1.1",
+  "pytest-asyncio==1.3.0",
+  "ruff==0.15.10",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

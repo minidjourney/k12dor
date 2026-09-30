@@ -1,0 +1,68 @@
+[
+  {
+    "channel": "mock",
+    "order_ref": "mock-order-001",
+    "fulfillment": "seller_shipped",
+    "ordered_at": "2026-01-01T00:00:00Z",
+    "paid_at": null,
+    "ordered_amount": null,
+    "customer_paid_amount": null,
+    "recognized_revenue": null,
+    "lines": [],
+    "completeness": {
+      "status": "incomplete",
+      "missing_fields": ["paid_at", "customer_paid_amount"],
+      "reasons": ["synthetic_missing_paid_fields"]
+    },
+    "source": {
+      "endpoint_id": "mock:orders",
+      "method": "MOCK",
+      "observed_at": "2026-01-01T03:00:00Z",
+      "data_basis": "synthetic_fixture"
+    }
+  },
+  {
+    "channel": "mock",
+    "order_ref": "mock-order-002",
+    "fulfillment": "marketplace_fulfillment",
+    "ordered_at": "2026-01-01T01:00:00Z",
+    "paid_at": "2026-01-01T01:01:00Z",
+    "ordered_amount": {"amount": "12000", "currency": "KRW"},
+    "customer_paid_amount": null,
+    "recognized_revenue": null,
+    "lines": [],
+    "completeness": {
+      "status": "incomplete",
+      "missing_fields": ["customer_paid_amount"],
+      "reasons": ["synthetic_missing_customer_paid_amount"]
+    },
+    "source": {
+      "endpoint_id": "mock:orders",
+      "method": "MOCK",
+      "observed_at": "2026-01-01T03:00:00Z",
+      "data_basis": "synthetic_fixture"
+    }
+  },
+  {
+    "channel": "mock",
+    "order_ref": "mock-order-003",
+    "fulfillment": "unknown",
+    "ordered_at": "2026-01-01T02:00:00Z",
+    "paid_at": null,
+    "ordered_amount": null,
+    "customer_paid_amount": null,
+    "recognized_revenue": null,
+    "lines": [],
+    "completeness": {
+      "status": "incomplete",
+      "missing_fields": ["paid_at", "customer_paid_amount"],
+      "reasons": ["synthetic_missing_paid_fields"]
+    },
+    "source": {
+      "endpoint_id": "mock:orders",
+      "method": "MOCK",
+      "observed_at": "2026-01-01T03:00:00Z",
+      "data_basis": "synthetic_fixture"
+    }
+  }
+]
