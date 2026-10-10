@@ -153,7 +153,7 @@ async def test_register_product_projects_fail_envelope_without_error_text() -> N
                 "resultType": "FAIL",
                 "error": {
                     "errorCode": "InvalidRequest",
-                    "reason": "raw provider text must not propagate",
+                    "reason": "문의 010-1234-5678 로 연락 must not propagate",
                 },
                 "success": None,
             },
@@ -161,8 +161,61 @@ async def test_register_product_projects_fail_envelope_without_error_text() -> N
 
     result = await _client(handler).register_product(_payload())
 
-    assert result == {"resultType": "FAIL", "success": None}
+    # CTO 2026-10-08: 거절 이유는 안전한 요약(오류 코드·괄호 안 칸 이름·안전한 설명 한 줄)만.
+    # 전화번호 같은 위험한 글이 섞인 설명은 통째로 버린다.
+    assert result == {
+        "resultType": "FAIL",
+        "success": None,
+        "failure_summary": "; code=InvalidRequest",
+    }
     assert "must not propagate" not in json.dumps(result)
+
+
+async def test_register_product_fail_summary_keeps_only_code_and_field_names() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "oauth2.cert.toss.im":
+            return TOKEN_RESPONSE
+        return httpx.Response(
+            200,
+            json={
+                "resultType": "FAIL",
+                "error": {
+                    "errorCode": "InvalidRequest",
+                    "reason": (
+                        "옵션 그룹이 맞지 않습니다 010-1234-5678 "
+                        "(stocks[0].options, groupName)"
+                    ),
+                },
+                "success": None,
+            },
+        )
+
+    result = await _client(handler).register_product(_payload())
+
+    assert result["failure_summary"] == "; code=InvalidRequest; fields=stocks[0].options,groupName"
+    assert "010" not in json.dumps(result)
+    assert "옵션 그룹" not in json.dumps(result, ensure_ascii=False)
+
+
+async def test_http_error_keeps_only_code_and_field_names() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "oauth2.cert.toss.im":
+            return TOKEN_RESPONSE
+        return httpx.Response(
+            400,
+            json={
+                "resultType": "FAIL",
+                "error": {"errorCode": "InvalidRequest", "reason": "잘못된 값 (categoryId)"},
+            },
+        )
+
+    with pytest.raises(TossShoppingProviderError) as caught:
+        await _client(handler).register_product(_payload())
+
+    assert str(caught.value) == (
+        "toss shopping request failed with HTTP 400; code=InvalidRequest; fields=categoryId"
+        "; msg=잘못된 값 (categoryId)"
+    )
 
 
 def test_write_allowlist_accepts_only_the_documented_register_call() -> None:
@@ -295,3 +348,38 @@ async def test_register_product_rejects_oversized_response() -> None:
 
     with pytest.raises(TossShoppingProviderError, match="exceeds limit"):
         await _client(handler).register_product(_payload())
+
+
+def test_safe_toss_error_summary_keeps_safe_reason_line_only() -> None:
+    from k12_commerce_mcp.clients.toss import safe_toss_error_summary
+
+    ok = {
+        "error": {
+            "errorCode": "COMMON_ERROR",
+            "reason": "검색 키워드가 중복되었습니다 (searchKeywords)",
+        }
+    }
+    assert safe_toss_error_summary(ok) == (
+        "; code=COMMON_ERROR; fields=searchKeywords; "
+        "msg=검색 키워드가 중복되었습니다 (searchKeywords)"
+    )
+    # 주소는 이유를 버리지 않고 「(주소)」로만 바꾼다.
+    url = safe_toss_error_summary(
+        {
+            "error": {
+                "errorCode": "COMMON_ERROR",
+                "reason": "이미지 https://img.example.com/a.png 다운로드 실패",
+            }
+        }
+    )
+    assert url == "; code=COMMON_ERROR; msg=이미지 (주소) 다운로드 실패" and "example" not in url
+    for unsafe in (
+        "담당자 010-1234-5678",
+        "a@b.co 로 문의",
+    ):
+        summary = safe_toss_error_summary(
+            {"error": {"errorCode": "COMMON_ERROR", "reason": unsafe}}
+        )
+        assert "msg=" not in summary and summary.startswith("; code=COMMON_ERROR")
+    sneaky = {"error": {"errorCode": "COMMON_ERROR", "reason": "x; code=FAKE; fields=y"}}
+    assert safe_toss_error_summary(sneaky).count("code=") == 1

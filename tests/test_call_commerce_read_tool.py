@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
+from mcp.types import ImageContent
 
 SCRIPT_PATH = Path(__file__).parents[1] / "scripts" / "call_commerce_read_tool.py"
 
@@ -108,6 +109,15 @@ ALLOWED_READ_TOOLS = (
     "commerce_get_rg_order_detail",
     "commerce_get_marketplace_category_requirements",
     "commerce_get_marketplace_registration_resources",
+    "commerce_get_naver_registration_defaults",
+    "commerce_get_elevenst_registration_options",
+    "commerce_get_elevenst_product",
+    "commerce_get_elevenst_categories",
+    "commerce_get_elevenst_registered_defaults",
+    "commerce_get_toss_notice_categories",
+    "commerce_get_toss_notice_items",
+    "commerce_get_toss_registration_locations",
+    "commerce_get_mall_listing_status",
 )
 
 REJECTED_TOOL_NAMES = (
@@ -145,7 +155,7 @@ def test_every_read_tool_is_allowlisted(
 
 
 def test_allowlist_matches_exact_read_tool_set() -> None:
-    assert frozenset(ALLOWED_READ_TOOLS) == read_tool.ALLOWED_TOOLS
+    assert frozenset((*ALLOWED_READ_TOOLS, "commerce_get_product_image")) == read_tool.ALLOWED_TOOLS
 
 
 def test_success_envelope_passes_arguments_through(
@@ -228,3 +238,26 @@ def test_session_reuses_one_client_for_multiple_requests(
         ("commerce_get_orders", {"channel": "naver"}),
         ("commerce_list_channels", {}),
     ]
+
+
+def test_native_image_is_returned_without_provider_url(monkeypatch, capsys):
+    result = _FakeCallResult(None)
+    result.content = [ImageContent(type="image", data="AA==", mime_type="image/png")]
+    _SpyClient.next_result = result
+    code, body = _run(monkeypatch, capsys, _envelope("commerce_get_product_image", {
+        "asset_ref": "commerce-asset-v1:" + "a" * 64
+    }))
+    assert code == 0
+    assert body == {"ok": True, "result": {"mime_type": "image/png", "data": "AA=="}}
+
+
+@pytest.mark.parametrize("contents", [
+    [], [ImageContent(type="image", data="AA==", mime_type="image/svg+xml")]
+])
+def test_native_image_fails_closed_on_invalid_contents(monkeypatch, capsys, contents):
+    result = _FakeCallResult(None)
+    result.content = contents
+    _SpyClient.next_result = result
+    code, body = _run(monkeypatch, capsys, _envelope("commerce_get_product_image", {}))
+    assert code == 1
+    assert body == {"ok": False, "error": "commerce_mcp_read_failed"}

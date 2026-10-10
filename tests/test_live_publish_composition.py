@@ -21,7 +21,7 @@ from mcp import Client
 from k12_commerce_mcp import composition
 from k12_commerce_mcp.clients.coupang import CoupangClient
 from k12_commerce_mcp.clients.naver import NaverClient
-from k12_commerce_mcp.clients.toss import TossShoppingClient
+from k12_commerce_mcp.clients.toss import TossShoppingClient, TossShoppingProviderError
 from k12_commerce_mcp.composition import (
     CoupangPublishClient,
     LivePublishPrerequisites,
@@ -41,6 +41,7 @@ from k12_commerce_mcp.publishing import (
     TossApprovalEvidence,
     TossCanonicalDraft,
     TossProductPublisher,
+    TossPublishStatus,
 )
 from k12_commerce_mcp.publishing.coupang import (
     CoupangDraftAttribute,
@@ -49,7 +50,10 @@ from k12_commerce_mcp.publishing.coupang import (
     CoupangDraftImage,
     CoupangDraftItem,
 )
-from k12_commerce_mcp.publishing.deferred_registration import approved_artifact_digest
+from k12_commerce_mcp.publishing.deferred_registration import (
+    approved_artifact_digest,
+    provider_id_digest,
+)
 from k12_commerce_mcp.publishing.dor_approval import DorChannelApprovalVerifier
 from k12_commerce_mcp.publishing.toss import (
     TossDraftDeliveryPolicy,
@@ -388,30 +392,43 @@ def _naver_transport(
     return httpx.MockTransport(handler)
 
 
+def _toss_token_response() -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "access_token": "fixture-token",
+            "expires_in": 3600,
+            "token_type": "Bearer",
+            "scope": "toss-shopping-fep:write",
+        },
+    )
+
+
+def _toss_register_response() -> httpx.Response:
+    return httpx.Response(
+        200, json={"resultType": "SUCCESS", "success": {"id": TOSS_PRODUCT_ID}}
+    )
+
+
 def _toss_transport(calls: list[tuple[str, str]]) -> httpx.MockTransport:
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append((request.method, request.url.path))
         if request.url.host == "oauth2.cert.toss.im":
+            return _toss_token_response()
+        if request.method == "POST":
+            return _toss_register_response()
+        # 실제 토스처럼 확인 읽기는 문서의 v2 주소에서만 성공한다 — 다른 GET 은 404.
+        if request.url.path == (
+            f"/api/v3/shopping-fep/products/{TOSS_PRODUCT_ID}/v2"
+        ):
             return httpx.Response(
                 200,
                 json={
-                    "access_token": "fixture-token",
-                    "expires_in": 3600,
-                    "token_type": "Bearer",
-                    "scope": "toss-shopping-fep:write",
+                    "resultType": "SUCCESS",
+                    "success": {"id": TOSS_PRODUCT_ID, "name": "토스 리클라이너"},
                 },
             )
-        if request.method == "POST":
-            return httpx.Response(
-                200, json={"resultType": "SUCCESS", "success": {"id": TOSS_PRODUCT_ID}}
-            )
-        return httpx.Response(
-            200,
-            json={
-                "resultType": "SUCCESS",
-                "success": {"id": TOSS_PRODUCT_ID, "name": "토스 리클라이너"},
-            },
-        )
+        return httpx.Response(404, json={})
 
     return httpx.MockTransport(handler)
 
@@ -740,8 +757,10 @@ async def test_live_publish_tools_execute_approved_drafts_end_to_end(
     assert calls["naver"][2][1].endswith("/v2/products")
     assert calls["naver"][3][1].endswith(f"/origin-products/{NAVER_ORIGIN_NO}")
     assert [method for method, _ in calls["toss"]] == ["POST", "POST", "GET"]
-    assert calls["toss"][1][1].endswith("/products/v2")
-    assert calls["toss"][2][1].endswith(f"/products/{TOSS_PRODUCT_ID}")
+    assert calls["toss"][1][1] == "/api/v3/shopping-fep/products/v2"
+    assert calls["toss"][2][1] == (
+        f"/api/v3/shopping-fep/products/{TOSS_PRODUCT_ID}/v2"
+    )
 
 
 async def test_publish_fails_closed_when_intent_row_missing(
@@ -835,6 +854,24 @@ async def test_coupang_readback_wraps_seller_product_detail(tmp_path: Path) -> N
     ]
 
 
+def _composed_toss_publisher(
+    tmp_path: Path, transport: httpx.MockTransport
+) -> tuple[TossProductPublisher, TossCanonicalDraft, TossApprovalEvidence]:
+    draft = _toss_draft()
+    evidence = _evidence(TossApprovalEvidence, draft)
+    dor_database = _dor_db(tmp_path)
+    _seed_dor(dor_database, evidence, "toss")
+    credentials = load_marketplace_credentials(_credential_file(tmp_path))
+    assert credentials.toss is not None
+    publisher = TossProductPublisher(
+        client=TossPublishClient(
+            TossShoppingClient(credentials.toss, transport=transport)
+        ),
+        approval_verifier=DorChannelApprovalVerifier(dor_database, channel="toss"),
+    )
+    return publisher, draft, evidence
+
+
 async def test_toss_readback_wraps_success_envelope(tmp_path: Path) -> None:
     calls: list[tuple[str, str]] = []
     client = TossShoppingClient(
@@ -845,8 +882,117 @@ async def test_toss_readback_wraps_success_envelope(tmp_path: Path) -> None:
 
     readback = await gateway.get_product(product_id=TOSS_PRODUCT_ID)
 
-    assert readback["resultType"] == "SUCCESS"
-    assert readback["success"]["id"] == TOSS_PRODUCT_ID
+    assert readback == {
+        "resultType": "SUCCESS",
+        "success": {"id": TOSS_PRODUCT_ID, "name": "토스 리클라이너"},
+    }
+    # 확인 읽기는 문서의 v2 주소로만 나가야 한다 — v1 주소는 실제 토스가 404 를 준다.
+    assert calls == [
+        ("POST", "/token"),
+        ("GET", f"/api/v3/shopping-fep/products/{TOSS_PRODUCT_ID}/v2"),
+    ]
+
+
+async def test_toss_publish_readback_uses_documented_v2_address(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[str, str]] = []
+    publisher, draft, evidence = _composed_toss_publisher(
+        tmp_path, _toss_transport(calls)
+    )
+
+    result = await publisher.publish(
+        draft, evidence, idempotency_key=evidence.artifact_digest
+    )
+
+    assert result.status is TossPublishStatus.PUBLISHED
+    assert result.receipt_verified is True
+    assert calls == [
+        ("POST", "/token"),
+        ("POST", "/api/v3/shopping-fep/products/v2"),
+        ("GET", f"/api/v3/shopping-fep/products/{TOSS_PRODUCT_ID}/v2"),
+    ]
+
+
+@pytest.mark.parametrize("failure", ("http_404", "connection_error"))
+async def test_toss_readback_failure_reports_pending_verification(
+    tmp_path: Path, failure: str
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        if request.url.host == "oauth2.cert.toss.im":
+            return _toss_token_response()
+        if request.method == "POST":
+            return _toss_register_response()
+        if failure == "connection_error":
+            raise httpx.ConnectError("connection refused", request=request)
+        return httpx.Response(404, json={})
+
+    publisher, draft, evidence = _composed_toss_publisher(
+        tmp_path, httpx.MockTransport(handler)
+    )
+    result = await publisher.publish(
+        draft, evidence, idempotency_key=evidence.artifact_digest
+    )
+
+    # 상품은 이미 등록됐다 — 확인 읽기 실패는 실패가 아니라 검증 보류다.
+    assert result.status is TossPublishStatus.PENDING_VERIFICATION
+    assert result.receipt_verified is False
+    assert result.reason == "provider readback failed"
+    assert result.product_digest == provider_id_digest(
+        evidence.artifact_digest, TOSS_PRODUCT_ID
+    )
+    assert str(TOSS_PRODUCT_ID) not in str(result.model_dump())
+    assert calls == [
+        ("POST", "/token"),
+        ("POST", "/api/v3/shopping-fep/products/v2"),
+        ("GET", f"/api/v3/shopping-fep/products/{TOSS_PRODUCT_ID}/v2"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("register_failure", "expected_error"),
+    (
+        ("fail_envelope", ValueError),
+        ("http_error", TossShoppingProviderError),
+    ),
+)
+async def test_toss_registration_failure_still_raises(
+    tmp_path: Path, register_failure: str, expected_error: type[Exception]
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append((request.method, request.url.path))
+        if request.url.host == "oauth2.cert.toss.im":
+            return _toss_token_response()
+        if request.method == "POST":
+            if register_failure == "fail_envelope":
+                return httpx.Response(
+                    200,
+                    json={
+                        "resultType": "FAIL",
+                        "error": {
+                            "errorCode": "InvalidRequest",
+                            "reason": "duplicate name (productName)",
+                        },
+                        "success": None,
+                    },
+                )
+            return httpx.Response(500, json={})
+        return httpx.Response(404, json={})
+
+    publisher, draft, evidence = _composed_toss_publisher(
+        tmp_path, httpx.MockTransport(handler)
+    )
+    with pytest.raises(expected_error):
+        await publisher.publish(
+            draft, evidence, idempotency_key=evidence.artifact_digest
+        )
+    # 등록 POST 자체의 실패 — 확인 읽기 GET 에는 닿지 않는다.
+    assert [method for method, _ in calls] == ["POST", "POST"]
 
 
 async def test_coupang_readback_failure_surfaces_as_unverified(tmp_path: Path) -> None:
@@ -863,3 +1009,32 @@ async def test_coupang_readback_failure_surfaces_as_unverified(tmp_path: Path) -
 
     assert readback["code"] != "SUCCESS"
     assert readback["data"] is None
+
+
+def test_elevenst_publisher_composes_only_with_key_and_dor_database(tmp_path: Path) -> None:
+    """11st (C2): the seller client is the publisher client; the verifier is
+    bound to DOR's channel name "11st"; no key or no DOR database → None."""
+    from k12_commerce_mcp.clients.elevenst_seller import ElevenstSellerClient
+    from k12_commerce_mcp.publishing import ElevenstProductPublisher
+
+    with_key = _credential_file(
+        tmp_path, extra_lines=("DOR_11ST_API_KEY=synthetic-11st-key-fixture",)
+    )
+    credentials = load_marketplace_credentials(with_key)
+    assert credentials.elevenst is not None
+    assert "synthetic-11st-key-fixture" not in repr(credentials)
+    prerequisites = _publish_prerequisites(tmp_path)
+    publishers = build_live_publishers(credentials, prerequisites)
+    assert isinstance(publishers.elevenst, ElevenstProductPublisher)
+    assert isinstance(publishers.elevenst._client, ElevenstSellerClient)
+    verifier = publishers.elevenst._approval_verifier
+    assert isinstance(verifier, DorChannelApprovalVerifier)
+    assert verifier._channel == "11st"
+    assert verifier._database_path == prerequisites.dor_database
+
+    no_db = build_live_publishers(credentials, LivePublishPrerequisites())
+    assert no_db.elevenst is None
+    without_key = build_live_publishers(
+        load_marketplace_credentials(_credential_file(tmp_path)), prerequisites
+    )
+    assert without_key.elevenst is None

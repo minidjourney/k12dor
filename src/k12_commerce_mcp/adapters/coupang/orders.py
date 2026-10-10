@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import hmac
 import re
+import secrets
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from ...clients.coupang import ORDER_SHEET_STATUSES
+from ...clients.coupang import (
+    ORDER_SHEET_STATUSES,
+    RG_ORDER_COLLECTION_MODES,
+    CoupangRequestError,
+    rg_order_collection_mode,
+)
 from ...models import (
     Channel,
     Completeness,
@@ -254,6 +260,25 @@ class CoupangOrderSummaryPage:
     summary: OrderSummary
 
 
+# Rocket Growth cursor continuations replay a frozen per-adapter-instance
+# snapshot instead of re-reading the provider. The bound keeps retained
+# canonical lines small and short-lived; expiry and eviction fail closed.
+RG_ORDER_SNAPSHOT_LIMIT = 4
+RG_ORDER_SNAPSHOT_LINE_LIMIT = 10_000
+RG_ORDER_SNAPSHOT_TTL = timedelta(minutes=5)
+
+
+@dataclass(frozen=True)
+class _RgOrderSnapshot:
+    """Canonical DTOs frozen after one complete provider walk."""
+
+    items: tuple[Order, ...]
+    summary: OrderSummary
+    fingerprint: str
+    line_count: int
+    created_at: datetime
+
+
 class CoupangRocketGrowthOrdersMixin:
     def _map_rg_order(
         self,
@@ -309,13 +334,57 @@ class CoupangRocketGrowthOrdersMixin:
             source=source,
         )
 
-    def _rg_cursor_offset(
+    def _rg_snapshot_store(self) -> dict[str, _RgOrderSnapshot]:
+        """Per-instance frozen snapshot cache; never shared or persisted."""
+        store = getattr(self, "_rg_order_snapshot_store", None)
+        if store is None:
+            store = {}
+            self._rg_order_snapshot_store = store
+        return store
+
+    def _rg_remember_snapshot(
+        self,
+        *,
+        items: tuple[Order, ...],
+        summary: OrderSummary,
+        fingerprint: str,
+    ) -> str:
+        """Freeze a completed read under a fresh opaque id; fail closed bounds."""
+        store = self._rg_snapshot_store()
+        created_at = self._clock().astimezone(UTC)
+        for key, entry in list(store.items()):
+            if created_at - entry.created_at > RG_ORDER_SNAPSHOT_TTL:
+                del store[key]
+        line_count = sum(len(order.lines) for order in items)
+        if line_count > RG_ORDER_SNAPSHOT_LINE_LIMIT:
+            raise AdapterInvalidResponseError(
+                "rocket growth order snapshot exceeds bounds"
+            )
+        while store and (
+            len(store) >= RG_ORDER_SNAPSHOT_LIMIT
+            or sum(entry.line_count for entry in store.values()) + line_count
+            > RG_ORDER_SNAPSHOT_LINE_LIMIT
+        ):
+            oldest = min(store, key=lambda key: store[key].created_at)
+            del store[oldest]
+        snapshot_id = secrets.token_hex(16)
+        store[snapshot_id] = _RgOrderSnapshot(
+            items=items,
+            summary=summary,
+            fingerprint=fingerprint,
+            line_count=line_count,
+            created_at=created_at,
+        )
+        return snapshot_id
+
+    def _rg_cursor_snapshot(
         self,
         state: dict[str, object],
         *,
         requested_date: date,
         page_size: int,
-    ) -> tuple[int, str]:
+        mode: str,
+    ) -> tuple[str, _RgOrderSnapshot, int]:
         if state.get("kind") != "rg_orders":
             raise AdapterInvalidCursorError("invalid coupang cursor")
         signature = state.get("sig")
@@ -325,6 +394,8 @@ class CoupangRocketGrowthOrdersMixin:
             self.client.credentials.vendor_id,
             state.get("date"),
             state.get("page_size"),
+            state.get("mode"),
+            state.get("snapshot"),
             state.get("offset"),
             state.get("fingerprint"),
         )
@@ -332,21 +403,51 @@ class CoupangRocketGrowthOrdersMixin:
             signature, expected_signature
         ):
             raise AdapterInvalidCursorError("invalid coupang cursor")
-        if state["date"] != requested_date.isoformat():
+        if state.get("date") != requested_date.isoformat():
             raise AdapterInvalidCursorError("coupang cursor date mismatch")
-        if state["page_size"] != page_size:
+        if (
+            type(state.get("page_size")) is not int
+            or state.get("page_size") != page_size
+        ):
             raise AdapterInvalidCursorError("coupang cursor page size mismatch")
-        offset = state["offset"]
-        fingerprint = state["fingerprint"]
-        if type(offset) is not int or offset < 0 or not isinstance(fingerprint, str):
+        if state.get("mode") != mode:
+            raise AdapterInvalidCursorError(
+                "coupang cursor collection mode mismatch"
+            )
+        offset = state.get("offset")
+        fingerprint = state.get("fingerprint")
+        snapshot_id = state.get("snapshot")
+        if (
+            type(offset) is not int
+            or offset < 0
+            or not isinstance(fingerprint, str)
+            or not isinstance(snapshot_id, str)
+        ):
             raise AdapterInvalidCursorError("invalid coupang cursor")
-        return offset, fingerprint
+        store = self._rg_snapshot_store()
+        snapshot = store.get(snapshot_id)
+        if (
+            snapshot is not None
+            and self._clock().astimezone(UTC) - snapshot.created_at
+            > RG_ORDER_SNAPSHOT_TTL
+        ):
+            del store[snapshot_id]
+            snapshot = None
+        if snapshot is None or not hmac.compare_digest(
+            snapshot.fingerprint, fingerprint
+        ):
+            raise AdapterInvalidCursorError("invalid coupang cursor")
+        if offset >= len(snapshot.items):
+            raise AdapterInvalidCursorError("invalid coupang cursor")
+        return snapshot_id, snapshot, offset
 
     def _rg_cursor(
         self,
         *,
         requested_date: date,
         page_size: int,
+        mode: str,
+        snapshot: str,
         offset: int,
         fingerprint: str,
     ) -> str:
@@ -356,6 +457,8 @@ class CoupangRocketGrowthOrdersMixin:
                 "kind": "rg_orders",
                 "date": requested_date.isoformat(),
                 "page_size": page_size,
+                "mode": mode,
+                "snapshot": snapshot,
                 "offset": offset,
                 "fingerprint": fingerprint,
                 "sig": _digest(
@@ -364,10 +467,48 @@ class CoupangRocketGrowthOrdersMixin:
                     self.client.credentials.vendor_id,
                     requested_date.isoformat(),
                     page_size,
+                    mode,
+                    snapshot,
                     offset,
                     fingerprint,
                 ),
             }
+        )
+
+    def _rg_orders_from_snapshot(
+        self,
+        cursor: str,
+        *,
+        requested_date: date,
+        page_size: int,
+        mode: str,
+    ) -> CoupangOrderSummaryPage:
+        """Serve a continuation from the frozen snapshot; no provider calls."""
+        snapshot_id, snapshot, offset = self._rg_cursor_snapshot(
+            _decode_cursor(cursor),
+            requested_date=requested_date,
+            page_size=page_size,
+            mode=mode,
+        )
+        items = tuple(
+            item.model_copy()
+            for item in snapshot.items[offset : offset + page_size]
+        )
+        next_offset = offset + len(items)
+        next_cursor = None
+        if next_offset < len(snapshot.items):
+            next_cursor = self._rg_cursor(
+                requested_date=requested_date,
+                page_size=page_size,
+                mode=mode,
+                snapshot=snapshot_id,
+                offset=next_offset,
+                fingerprint=snapshot.fingerprint,
+            )
+        return CoupangOrderSummaryPage(
+            items=items,
+            next_cursor=next_cursor,
+            summary=snapshot.summary.model_copy(),
         )
 
     def _rg_snapshot_fingerprint(
@@ -391,13 +532,17 @@ class CoupangRocketGrowthOrdersMixin:
         if type(page_size) is not int or not 1 <= page_size <= 100:
             raise ValueError("page_size must be between 1 and 100")
         requested_date = business_date or self._default_business_date()
-        offset = 0
-        expected_fingerprint = None
+        collection_mode = rg_order_collection_mode.get()
+        if collection_mode not in RG_ORDER_COLLECTION_MODES:
+            raise CoupangRequestError(
+                "unsupported rocket growth collection mode"
+            )
         if cursor is not None:
-            offset, expected_fingerprint = self._rg_cursor_offset(
-                _decode_cursor(cursor),
+            return self._rg_orders_from_snapshot(
+                cursor,
                 requested_date=requested_date,
                 page_size=page_size,
+                mode=collection_mode,
             )
         observed_at = self._clock().astimezone(UTC)
         next_token = None
@@ -416,6 +561,7 @@ class CoupangRocketGrowthOrdersMixin:
             page = await self.client.list_rg_orders(
                 business_date=requested_date,
                 next_token=next_token,
+                collection_mode=collection_mode,
             )
             pages += 1
             for row in page.rows:
@@ -605,40 +751,42 @@ class CoupangRocketGrowthOrdersMixin:
                 ),
             ),
         )
-        if expected_fingerprint is not None:
-            if not hmac.compare_digest(expected_fingerprint, fingerprint):
-                raise AdapterInvalidCursorError(
-                    "rocket growth order snapshot changed"
-                )
-            if offset >= len(orders):
-                raise AdapterInvalidCursorError("invalid coupang cursor")
-        ordered_items = [
+        ordered_items = tuple(
             self._map_rg_order(order_identity, entry, item_source)
             for order_identity, entry in sorted(orders.items())
-        ]
-        items = tuple(ordered_items[offset : offset + page_size])
-        next_offset = offset + len(items)
+        )
+        summary = OrderSummary(
+            order_count=len(orders) if order_count_complete else None,
+            sales_quantity=sales_quantity if sales_quantity_complete else None,
+            order_sales=summary_money,
+            status=summary_status,
+            reasons=tuple(dict.fromkeys(reasons)),
+            source=self._source(
+                observed_at,
+                "coupang:rg/orders",
+                "provider_order_original_safe_aggregate",
+            ),
+        )
+        # Freeze the canonical day only after the provider walk completed
+        # without error; a failed or oversized read publishes nothing.
+        snapshot_id = self._rg_remember_snapshot(
+            items=ordered_items,
+            summary=summary,
+            fingerprint=fingerprint,
+        )
+        items = tuple(item.model_copy() for item in ordered_items[:page_size])
         next_cursor = None
-        if next_offset < len(ordered_items):
+        if len(ordered_items) > page_size:
             next_cursor = self._rg_cursor(
                 requested_date=requested_date,
                 page_size=page_size,
-                offset=next_offset,
+                mode=collection_mode,
+                snapshot=snapshot_id,
+                offset=len(items),
                 fingerprint=fingerprint,
             )
         return CoupangOrderSummaryPage(
             items=items,
             next_cursor=next_cursor,
-            summary=OrderSummary(
-                order_count=len(orders) if order_count_complete else None,
-                sales_quantity=sales_quantity if sales_quantity_complete else None,
-                order_sales=summary_money,
-                status=summary_status,
-                reasons=tuple(dict.fromkeys(reasons)),
-                source=self._source(
-                    observed_at,
-                    "coupang:rg/orders",
-                    "provider_order_original_safe_aggregate",
-                ),
-            ),
+            summary=summary.model_copy(),
         )

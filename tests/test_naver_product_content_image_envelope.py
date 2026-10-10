@@ -81,9 +81,9 @@ async def test_object_envelope_returns_representative_then_one_optional() -> Non
     assert content.channel is Channel.NAVER
     assert content.image_urls == (REP, OPT)
     assert content.description_text == DESCRIPTION
-    assert content.completeness.status is ResultStatus.COMPLETE
-    assert content.completeness.missing_fields == ()
-    assert content.completeness.reasons == ()
+    assert content.completeness.status is ResultStatus.INCOMPLETE
+    assert content.completeness.missing_fields == ("notices",)
+    assert content.completeness.reasons == ("provider_content_fields_missing",)
 
 
 @pytest.mark.asyncio
@@ -94,8 +94,9 @@ async def test_legacy_image_list_still_returns_https_urls() -> None:
 
     assert content is not None
     assert content.image_urls == (REP, OPT)
-    assert content.completeness.status is ResultStatus.COMPLETE
+    assert content.completeness.status is ResultStatus.INCOMPLETE
     assert "image_urls" not in content.completeness.missing_fields
+    assert "notices" in content.completeness.missing_fields
 
 
 @pytest.mark.asyncio
@@ -108,7 +109,7 @@ async def test_absent_image_info_stays_incomplete() -> None:
     assert content.image_urls == ()
     assert content.description_text == DESCRIPTION
     assert content.completeness.status is ResultStatus.INCOMPLETE
-    assert content.completeness.missing_fields == ("image_urls",)
+    assert content.completeness.missing_fields == ("notices", "image_urls")
     assert content.completeness.reasons == ("provider_content_fields_missing",)
 
 
@@ -156,8 +157,11 @@ async def test_phone_like_public_asset_is_withheld_without_disabling_global_gate
     assert result.status is ResultStatus.INCOMPLETE
     assert result.item is not None
     assert result.item.image_urls == tuple(image["url"] for image in other_images)
-    assert result.item.completeness.missing_fields == ("image_urls",)
-    assert result.reasons == ("unsafe_image_urls_withheld",)
+    assert result.item.completeness.missing_fields == ("notices", "image_urls")
+    assert result.reasons == (
+        "provider_content_fields_missing",
+        "unsafe_image_urls_withheld",
+    )
     assert PHONE_ASSET not in result.model_dump_json()
     assert_agent_safe_value(result)
 

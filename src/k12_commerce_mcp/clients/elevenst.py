@@ -1,19 +1,14 @@
 """11st public category transport: two unauthenticated GET XML endpoints.
 
 Boundary: this client may reach only the documented public reads
-``http://api.11st.co.kr/rest/cateservice/category`` and
-``http://api.11st.co.kr/rest/cateservice/category/{dispCtgrNo}``. No API
-key exists, no seller/authenticated endpoint is reachable, and no caller
-supplied URL is ever honored.
-
-Transport limitation: the provider documents these endpoints as cleartext
-HTTP, not HTTPS. That is a provider-side constraint this module does not
-mask — only public catalog category data transits the channel and no
-credential or body is ever sent.
+``https://api.11st.co.kr/rest/cateservice/category`` and
+``https://api.11st.co.kr/rest/cateservice/category/{dispCtgrNo}`` over
+HTTPS. No API key exists on this client, no seller/authenticated endpoint
+is reachable, and no caller supplied URL is ever honored.
 
 Status: the public category list and child GETs were exercised against
 live provider responses through the MCP read tool; seller/authenticated
-endpoints remain unverified and disabled.
+endpoints live in the separate ``elevenst_seller`` client.
 """
 
 from __future__ import annotations
@@ -30,9 +25,9 @@ from ..adapters.base import (
     AdapterTimeoutError,
 )
 
-CATEGORY_LIST_URL = "http://api.11st.co.kr/rest/cateservice/category"
+CATEGORY_LIST_URL = "https://api.11st.co.kr/rest/cateservice/category"
 CATEGORY_CHILDREN_URL = (
-    "http://api.11st.co.kr/rest/cateservice/category/{disp_ctgr_no}"
+    "https://api.11st.co.kr/rest/cateservice/category/{disp_ctgr_no}"
 )
 
 # Exact scheme+host+path templates; the only variable segment is digits.

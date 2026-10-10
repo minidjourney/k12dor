@@ -326,6 +326,10 @@ def _naver_payload(product: CanonicalCommonProduct, config: NaverChannelConfig) 
     for key, value in derived.items():
         if payload.get(key) in (None, "") and value is not None:
             payload[key] = value
+    # CTO 2026-10-08: 준비 확인(읽기 전용)에서는 네이버 옵션 가격 칸을 붙이지 않는다.
+    # 공통 옵션 가격(쿠팡 판매가)과 상품 판매가(대표님 저장값)가 다르면 「sale_price
+    # must equal the lowest option price_before_discount」로 네이버 준비가 통째로
+    # 막혔다(실데이터 재현). 등록 초안의 옵션·할인 칸은 DOR 이 몰별 가격으로 만든다.
     payload["channel"] = "naver"
     return payload
 
@@ -387,7 +391,14 @@ def _toss_payload(
     if exposure:
         payload["exposure"] = exposure
     if product.options:
-        main_ref = main_option_ref or product.options[0].option_ref
+        # 기본 isMainPrice 는 기준 옵션(할인 전 가격이 가장 낮은 옵션)에 둔다 —
+        # TossCanonicalDraft 가 낮은 origin_price stock 에만 isMainPrice 를 허용한다.
+        priced = [option for option in product.options if option.price is not None]
+        main_ref = main_option_ref or (
+            min(priced, key=lambda option: option.price).option_ref
+            if priced
+            else product.options[0].option_ref
+        )
         payload["stocks"] = [
             _toss_stock(option, is_main=option.option_ref == main_ref, image_map=image_map)
             for option in product.options

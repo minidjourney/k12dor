@@ -48,6 +48,17 @@ SAFE_OPAQUE_HMAC = re.compile(
     r"^(?:coupang|naver|toss)-(?:order|line|claim|cancel)-hmac-v1:[0-9a-f]{64}$"
 )
 
+# Marketplace product/option identifiers are seller-catalog numbers, not personal
+# data, but a 10-digit id such as 1712345678 matches the hyphen-less mobile
+# pattern below and used to reject a whole product read (Toss option ids,
+# CTO 2026-10-08). Exempt ONLY these exact field names AND only a pure digit
+# string of 1~20 characters; every other field and every other shape is still
+# scanned (customer/order ids stay HMAC-digested elsewhere).
+SAFE_CATALOG_ID_FIELDS = frozenset(
+    {"external_product_id", "external_option_id", "external_option_ids"}
+)
+SAFE_CATALOG_ID_VALUE = re.compile(r"^[0-9]{1,20}$")
+
 UNSAFE_VALUE_PATTERNS = (
     re.compile(r"\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
     re.compile(r"(?<!\d)(?:\+?82[- .]?)?0?1[016789][- .]?\d{3,4}[- .]?\d{4}(?!\d)"),
@@ -69,6 +80,21 @@ UNSAFE_VALUE_PATTERNS = (
 )
 
 
+def _is_catalog_id_value(value: Any) -> bool:
+    """A catalog id field value: one pure-digit string/int, or a list/tuple of them."""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value >= 0 and len(str(value)) <= 20
+    if isinstance(value, str):
+        return SAFE_CATALOG_ID_VALUE.fullmatch(value) is not None
+    if isinstance(value, (list, tuple)):
+        return all(
+            not isinstance(item, (list, tuple)) and _is_catalog_id_value(item) for item in value
+        )
+    return False
+
+
 def assert_agent_safe_value(value: Any) -> None:
     """Reject known unsafe field names and string shapes in runtime output."""
     if isinstance(value, BaseModel):
@@ -78,6 +104,8 @@ def assert_agent_safe_value(value: Any) -> None:
             normalized = str(key).lower()
             if any(part in normalized for part in FORBIDDEN_PII_FIELD_PARTS):
                 raise PiiValueError(f"forbidden PII field: {key}")
+            if normalized in SAFE_CATALOG_ID_FIELDS and _is_catalog_id_value(child):
+                continue
             assert_agent_safe_value(child)
         return
     if isinstance(value, (list, tuple)):
@@ -126,3 +154,34 @@ def assert_agent_safe_schema(model: type[BaseModel]) -> None:
                 visit(value)
 
     visit(schema)
+
+
+
+# CTO 2026-10-08 (19:16 네이버 400·19:17 토스 COMMON_ERROR — 거절 「이유」가
+# 화면에 안 보여 원인을 못 찾음): 쇼핑몰이 돌려준 거절 문구를 대표님 화면에
+# 한 줄로 보이기 위한 정리. 줄바꿈을 없애고 좁은 글자 집합만 남기며 ';'·'=' 는 지워
+# 「; key=value」 조각을 흉내 낼 수 없게 한다.
+# 전화·이메일·주소·토큰·JSON 모양이 남으면 통째로 버린다.
+_PROVIDER_MESSAGE_DROP = re.compile(r"[^0-9A-Za-z가-힣ㄱ-ㅎㅏ-ㅣ .,:()%·+~!?_-]")
+_PROVIDER_MESSAGE_URLISH = re.compile(
+    r"(?i)https?|www\.|\b[a-z0-9-]+\.(?:com|net|org|kr|io|im|co)\b"
+)
+
+
+def safe_provider_message(value: Any, *, limit: int = 160) -> str:
+    """One-line, Agent-safe excerpt of a marketplace rejection message ('' when unsafe)."""
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    line = " ".join(value.split())[: limit * 4]
+    if not is_agent_safe_value(line):
+        return ""
+    line = re.sub(r"(?i)\b(?:https?://|www\.)\S+", "(주소)", line)
+    line = re.sub(r"(?i)\b[\w.-]+\.(?:com|net|org|kr|io|im|co)(?:/\S*)?", "(주소)", line)
+    cleaned = " ".join(_PROVIDER_MESSAGE_DROP.sub("", line).split())[:limit].strip()
+    if (
+        not cleaned
+        or not re.search(r"[가-힣A-Za-z]", cleaned)
+        or _PROVIDER_MESSAGE_URLISH.search(cleaned)
+    ):
+        return ""
+    return cleaned if is_agent_safe_value(cleaned) else ""

@@ -636,3 +636,18 @@ async def test_tool_reports_execution_configured_with_injected_publisher() -> No
     entry = result.structured_content["channels"][0]
     assert entry["ready"] is True
     assert entry["external_execution_configured"] is True
+
+
+def test_naver_readiness_is_not_blocked_by_option_prices_differing_from_sale_price() -> None:
+    """CTO 2026-10-08 실데이터: 공통 옵션 가격(쿠팡 판매가)과 상품 판매가(대표님 저장값)가
+    다르면, 옵션 가격 칸을 붙인 준비 초안이 「sale_price must equal the lowest option
+    price_before_discount」로 네이버 준비를 통째로 막았다. 준비 확인에는 네이버 옵션
+    가격 칸을 붙이지 않는다(실제 등록 초안의 옵션·할인 칸은 DOR 이 만든다)."""
+    service = MarketplaceReadinessService()
+    cheaper = complete_product().model_copy(update={"price": 9900})
+    result = service.evaluate(cheaper, (naver_config(),))
+    entry = result.channels[0]
+    assert entry.invalid_fields == ()
+    assert entry.ready is True
+    assert entry.prepared_draft is not None
+    assert entry.prepared_draft.sale_price == 9900

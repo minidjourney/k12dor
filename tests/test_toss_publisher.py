@@ -6,13 +6,17 @@ from typing import Any
 import pytest
 from mcp import Client
 
+from k12_commerce_mcp.clients.toss import TossShoppingProviderError
 from k12_commerce_mcp.publishing import (
     TossApprovalEvidence,
     TossCanonicalDraft,
     TossProductPublisher,
     TossPublishStatus,
 )
-from k12_commerce_mcp.publishing.deferred_registration import approved_artifact_digest
+from k12_commerce_mcp.publishing.deferred_registration import (
+    approved_artifact_digest,
+    provider_id_digest,
+)
 from k12_commerce_mcp.publishing.toss import (
     TossDraftDeliveryPolicy,
     TossDraftExchangeReturnPolicy,
@@ -30,7 +34,13 @@ from k12_commerce_mcp.write_gate import DeferredWrite, assert_registration_enabl
 class FakeTossWriteClient:
     """In-memory Toss write/readback stub; no HTTP ever leaves the test."""
 
-    def __init__(self, *, create_response: Any = None, readback_id: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        create_response: Any = None,
+        readback_id: int | None = None,
+        readback_error: BaseException | None = None,
+    ) -> None:
         self.calls: list[tuple[str, Any]] = []
         self.create_response = (
             create_response
@@ -38,6 +48,7 @@ class FakeTossWriteClient:
             else {"resultType": "SUCCESS", "error": None, "success": {"id": 123}}
         )
         self.readback_id = readback_id
+        self.readback_error = readback_error
 
     async def register_product(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("create", payload))
@@ -45,6 +56,8 @@ class FakeTossWriteClient:
 
     async def get_product(self, *, product_id: int) -> dict[str, Any]:
         self.calls.append(("readback", product_id))
+        if self.readback_error is not None:
+            raise self.readback_error
         resolved = self.readback_id if self.readback_id is not None else product_id
         return {
             "resultType": "SUCCESS",
@@ -192,7 +205,34 @@ async def test_readback_id_mismatch_returns_pending_verification() -> None:
     ).publish(value, evidence, idempotency_key=evidence.artifact_digest)
     assert result.status is TossPublishStatus.PENDING_VERIFICATION
     assert result.receipt_verified is False
-    assert result.product_digest is None
+    assert result.product_digest == provider_id_digest(evidence.artifact_digest, 123)
+    assert '"123"' not in str(result.model_dump())
+
+
+@pytest.mark.parametrize(
+    "readback_error",
+    (
+        TossShoppingProviderError("toss shopping request failed with HTTP 404"),
+        TossShoppingProviderError("toss shopping network request failed"),
+        ValueError("toss shopping product detail response shape is invalid"),
+    ),
+    ids=("http_error", "network_error", "malformed_shape"),
+)
+async def test_readback_failure_reports_pending_with_product_digest(
+    readback_error: BaseException,
+) -> None:
+    client = FakeTossWriteClient(readback_error=readback_error)
+    value, evidence = approved_pair()
+    result = await TossProductPublisher(
+        client=client, approval_verifier=FakeApprovalVerifier()
+    ).publish(value, evidence, idempotency_key=evidence.artifact_digest)
+    # 등록 응답에서 상품 번호를 받은 뒤라 상품은 이미 만들어졌다 — 실패가 아니라 검증 보류.
+    assert [name for name, _ in client.calls] == ["create", "readback"]
+    assert result.status is TossPublishStatus.PENDING_VERIFICATION
+    assert result.receipt_verified is False
+    assert result.reason == "provider readback failed"
+    assert result.product_digest == provider_id_digest(evidence.artifact_digest, 123)
+    assert '"123"' not in str(result.model_dump())
 
 
 async def test_missing_external_publish_approval_rejects_before_any_client_call() -> None:
@@ -310,3 +350,151 @@ async def test_mcp_tool_call_fails_closed_without_publisher() -> None:
             },
         )
     assert called.is_error is True
+
+
+def _stock(
+    *, origin_price: int, sale_price: int, is_main_price: bool, value_name: str
+) -> dict[str, Any]:
+    return {
+        "options": [{"group_name": "색상", "value_name": value_name}],
+        "remaining_count": 5,
+        "is_hide": False,
+        "is_main_price": is_main_price,
+        "is_sold_out": False,
+        "origin_price": origin_price,
+        "sale_price": sale_price,
+    }
+
+
+def test_stocks_carry_per_option_origin_and_sale_prices() -> None:
+    payload = TossProductPublisher._provider_payload(draft())
+    stock = payload["stocks"][0]
+    assert stock["originPrice"] == 20000
+    assert stock["salePrice"] == 18000
+    assert stock["isMainPrice"] is True
+    # discount_amount 는 초안 선언용 칸 — 몰 본문에는 나가지 않는다.
+    assert "discountAmount" not in payload
+    assert "discount_amount" not in payload
+
+
+def test_each_stock_keeps_its_own_price_pair() -> None:
+    value = TossCanonicalDraft(
+        **{
+            **draft().model_dump(),
+            "stocks": [
+                _stock(
+                    origin_price=20000, sale_price=18000,
+                    is_main_price=False, value_name="기본",
+                ),
+                _stock(
+                    origin_price=15000, sale_price=14000,
+                    is_main_price=True, value_name="소형",
+                ),
+            ],
+        }
+    )
+    payload = TossProductPublisher._provider_payload(value)
+    assert payload["stocks"][0]["originPrice"] == 20000
+    assert payload["stocks"][0]["salePrice"] == 18000
+    assert payload["stocks"][0]["isMainPrice"] is False
+    assert payload["stocks"][1]["originPrice"] == 15000
+    assert payload["stocks"][1]["salePrice"] == 14000
+    assert payload["stocks"][1]["isMainPrice"] is True
+
+
+def test_main_price_must_sit_on_the_lowest_origin_price_stock() -> None:
+    with pytest.raises(ValueError, match="lowest origin_price"):
+        TossCanonicalDraft(
+            **{
+                **draft().model_dump(),
+                "stocks": [
+                    _stock(
+                        origin_price=20000, sale_price=18000,
+                        is_main_price=True, value_name="기본",
+                    ),
+                    _stock(
+                        origin_price=15000, sale_price=14000,
+                        is_main_price=False, value_name="소형",
+                    ),
+                ],
+            }
+        )
+
+
+def test_sale_price_cannot_exceed_origin_price() -> None:
+    with pytest.raises(ValueError, match="sale_price cannot exceed origin_price"):
+        TossCanonicalDraft(
+            **{
+                **draft().model_dump(),
+                "stocks": [
+                    _stock(
+                        origin_price=20000, sale_price=21000,
+                        is_main_price=True, value_name="기본",
+                    ),
+                ],
+            }
+        )
+
+
+def test_declared_discount_must_match_every_stock_discount() -> None:
+    with pytest.raises(ValueError, match="discount_amount does not match"):
+        TossCanonicalDraft(
+            **{
+                **draft().model_dump(),
+                "discount_amount": 1500,
+                "stocks": [
+                    _stock(
+                        origin_price=20000, sale_price=18000,
+                        is_main_price=False, value_name="기본",
+                    ),
+                    _stock(
+                        origin_price=15000, sale_price=13500,
+                        is_main_price=True, value_name="소형",
+                    ),
+                ],
+            }
+        )
+
+
+def test_legacy_draft_dump_keeps_approved_key_shape() -> None:
+    dumped = draft().model_dump(mode="json")
+    # DOR 이 보내는 top 15칸 — 새 discount_amount 는 비어 있으면 빠진다.
+    assert set(dumped) == {
+        "channel",
+        "name",
+        "category_id",
+        "stocks",
+        "images",
+        "exposure",
+        "is_tax_free",
+        "delivery_policy",
+        "exchange_return_policy",
+        "notice",
+        "brand_name",
+        "is_culture_deduction",
+        "management_code",
+        "partner_name",
+        "book_info",
+    }
+    assert "discount_amount" not in dumped
+    assert set(dumped["stocks"][0]) == {
+        "options",
+        "search_option",
+        "remaining_count",
+        "is_hide",
+        "is_main_price",
+        "is_sold_out",
+        "origin_price",
+        "sale_price",
+        "is_purchasable_alone",
+        "management_code",
+        "representative_thumbnail_image",
+        "images",
+    }
+    assert set(dumped["images"][0]) == {"type", "url", "order", "html", "product_item_id"}
+
+
+def test_discount_amount_serializes_when_set() -> None:
+    value = TossCanonicalDraft(**{**draft().model_dump(), "discount_amount": 2000})
+    dumped = value.model_dump(mode="json")
+    assert dumped["discount_amount"] == 2000

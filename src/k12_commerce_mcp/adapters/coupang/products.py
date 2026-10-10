@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, date
 from typing import Any
 
+from ...image_assets import IMAGE_ASSETS, ImageAssetError
 from ...models import (
     Channel,
     Completeness,
@@ -14,19 +15,39 @@ from ...models import (
     ProductDetail,
     ResultStatus,
 )
-from ...models.products import ProductOption
-from ...product_images import coupang_branches, coupang_image_refs, coupang_images
+from ...models.products import ProductImage, ProductImageReference, ProductOption
+from ...product_images import (
+    _withhold_coupang_phone_asset,
+    body_images,
+    coupang_branches,
+    coupang_image_refs,
+    coupang_image_url,
+    coupang_images,
+    unique_images,
+)
 from ...product_options import money, option_completeness, option_id
 from ..base import AdapterFailure, AdapterInvalidResponseError
 from ..mock import MockPage
 from .mapper import (
+    _detail_html,
     _detail_text,
     _first_string,
+    _notice_items,
     _product_state,
     _project,
 )
 
 _BRAND_NAME_KEYS = ("name", "brandName", "brand", "koreanName")
+
+# Integrity tripwires stay fail-closed even under the unsupported-detail
+# fallback: a corrupted price/number must not degrade to a list-level read.
+_DETAIL_INTEGRITY_ERRORS = frozenset(
+    {
+        "option number is invalid",
+        "option price data is invalid",
+        "option price fields conflict",
+    }
+)
 
 
 def _has_rocket_growth_item(row: dict[str, Any]) -> bool:
@@ -40,6 +61,52 @@ def _has_rocket_growth_item(row: dict[str, Any]) -> bool:
         )
         for item in items
     )
+
+def _root_content_images(row: dict[str, Any]) -> tuple[list[ProductImage], bool]:
+    """Images under top-level contents[] beside the per-item branches."""
+    result: list[ProductImage] = []
+    withheld = False
+    groups = row.get("contents", [])
+    if not isinstance(groups, list) or len(groups) > 100:
+        raise AdapterInvalidResponseError("product contents shape is invalid")
+    for group in groups:
+        details = group.get("contentDetails") if isinstance(group, dict) else None
+        if details is None:
+            continue
+        details = details if isinstance(details, list) else [details]
+        if len(details) > 100:
+            raise AdapterInvalidResponseError("content detail count exceeds bound")
+        for detail in details:
+            if not isinstance(detail, dict):
+                raise AdapterInvalidResponseError("content detail row is invalid")
+            urls: tuple[str, ...] = ()
+            if detail.get("detailType") == "IMAGE":
+                url = coupang_image_url(detail.get("content"))
+                if url is not None:
+                    urls = (url,)
+                else:
+                    withheld = True
+            elif detail.get("detailType") == "TEXT":
+                urls, blocked = body_images(detail.get("content"))
+                withheld |= blocked
+            for url in urls:
+                if _withhold_coupang_phone_asset(url):
+                    withheld = True
+                else:
+                    result.append(ProductImage(url=url, role="detail"))
+    return result, withheld
+
+
+def _root_content_refs(images: list[ProductImage]) -> list[ProductImageReference]:
+    refs = []
+    for image in images:
+        try:
+            reference = IMAGE_ASSETS.register(image.url)
+        except ImageAssetError:
+            continue
+        refs.append(ProductImageReference(asset_ref=reference, role=image.role))
+    return refs
+
 
 _CATEGORY_NAME_KEYS = (
     "name",
@@ -198,6 +265,15 @@ class CoupangProductsMixin:
             if price is not None and nested_price is not None and price != nested_price:
                 raise AdapterInvalidResponseError("option price fields conflict")
             price = nested_price if nested_price is not None else price
+            base_price = money(branch.get("originalPrice"))
+            nested_base = (
+                money(price_data.get("originalPrice"))
+                if isinstance(price_data, dict)
+                else None
+            )
+            if base_price is not None and nested_base is not None and base_price != nested_base:
+                raise AdapterInvalidResponseError("option price fields conflict")
+            base_price = nested_base if nested_base is not None else base_price
             price_source = (
                 self._source(
                     self._clock().astimezone(UTC),
@@ -216,7 +292,10 @@ class CoupangProductsMixin:
             )
             attributes = []
             raw_attributes = branch.get("attributes", [])
-            if not isinstance(raw_attributes, list) or len(raw_attributes) > 30:
+            # Provider publishes no verified attribute-count maximum; 50 is a
+            # local bound. Beyond it get_product_detail degrades to the
+            # unsupported_detail_api list-level fallback instead of failing.
+            if not isinstance(raw_attributes, list) or len(raw_attributes) > 50:
                 raise AdapterInvalidResponseError("option attributes are invalid")
             for attribute in raw_attributes:
                 if not isinstance(attribute, dict):
@@ -301,6 +380,9 @@ class CoupangProductsMixin:
                             if rg
                             else "provider_listing_quantity",
                         )
+            if base_price is not None and price is not None and base_price.amount < price.amount:
+                base_price = None
+                reasons.append("option_original_price_below_sale_price")
             if quantity is None:
                 reasons.append("option_quantity_not_observed")
             result.append(
@@ -311,6 +393,7 @@ class CoupangProductsMixin:
                     name=name,
                     attributes=tuple(attributes),
                     listing_price=price,
+                    base_listing_price=base_price,
                     price_source=price_source,
                     price_basis="provider_item_sale_price" if price is not None else None,
                     quantity=quantity,
@@ -345,11 +428,23 @@ class CoupangProductsMixin:
         if row is None or str(row.get("sellerProductId")) != external_product_id:
             return None
         observed_at = self._clock().astimezone(UTC)
-        option_records = await self._linked_options(
-            row,
-            external_product_id,
-            include_inventory=include_option_inventory,
-        )
+        # O-SELLER fallback: when the option/image projection cannot fully map
+        # the product, return collected list-level detail flagged incomplete
+        # rather than failing the whole read with invalid_adapter_response.
+        # Price/number corruption stays fatal: a wrong price is worse than a
+        # missing one, so those integrity errors keep propagating.
+        unsupported_reason: str | None = None
+        try:
+            option_records = await self._linked_options(
+                row,
+                external_product_id,
+                include_inventory=include_option_inventory,
+            )
+        except AdapterInvalidResponseError as exc:
+            if str(exc) in _DETAIL_INTEGRITY_ERRORS:
+                raise
+            option_records = ()
+            unsupported_reason = str(exc)[:200] or "detail_option_mapping_failed"
         option_ids = [option.external_option_id for option in option_records]
         attributes = [attribute for option in option_records for attribute in option.attributes]
         name = row.get("sellerProductName")
@@ -382,10 +477,19 @@ class CoupangProductsMixin:
             category_name=category if isinstance(category, str) else None,
             model_name=model_name if isinstance(model_name, str) else None,
             attributes=tuple(dict.fromkeys(attributes)),
+            unsupported_detail_api=unsupported_reason is not None,
+            unsupported_detail_reason=unsupported_reason,
             completeness=Completeness(
                 status=ResultStatus.INCOMPLETE,
                 missing_fields=tuple(missing),
-                reasons=("master_sku_link_not_verified",),
+                reasons=tuple(
+                    dict.fromkeys(
+                        (
+                            "master_sku_link_not_verified",
+                            *(("unsupported_detail_api",) if unsupported_reason else ()),
+                        )
+                    )
+                ),
             ),
             source=self._source(
                 observed_at,
@@ -402,30 +506,57 @@ class CoupangProductsMixin:
         if not isinstance(title, str) or not title.strip():
             return None
         observed_at = self._clock().astimezone(UTC)
-        scoped_row = {"items": list(coupang_branches(row, self.channel))}
+        branches = coupang_branches(row, self.channel)
+        scoped_row = {"items": list(branches), "contents": row.get("contents")}
         description = _detail_text(scoped_row)
+        detail_html, html_withheld, html_truncated = _detail_html(scoped_row)
+        notices, notices_withheld = _notice_items((row, *branches))
         role_images, image_withheld = coupang_images(row, self.channel)
+        root_images, root_withheld = _root_content_images(row)
+        image_withheld = image_withheld or root_withheld
+        role_images = unique_images([*role_images, *root_images])
+        image_refs = tuple(
+            dict.fromkeys(
+                (*coupang_image_refs(row, self.channel), *_root_content_refs(root_images))
+            )
+        )
         images = tuple(dict.fromkeys(image.url for image in role_images if image.role != "detail"))
         missing = []
+        reasons = []
         if description is None:
             missing.append("description_text")
+        if detail_html is None or html_withheld or html_truncated:
+            missing.append("detail_html")
+        if html_withheld:
+            reasons.append("unsafe_detail_html_withheld")
+        if html_truncated:
+            reasons.append("detail_html_truncated")
+        if not notices:
+            missing.append("notices")
+        if notices_withheld:
+            missing.append("notice_values")
+            reasons.append("notice_values_withheld")
         if not images:
             missing.append("image_urls")
         if image_withheld:
             missing.append("images")
         status = ResultStatus.COMPLETE if not missing else ResultStatus.INCOMPLETE
+        if missing:
+            reasons.insert(0, "provider_content_fields_missing")
         return ProductContent(
             channel=Channel(self.channel),
             external_product_id=external_product_id,
             title=title,
             description_text=description,
+            detail_html=detail_html,
+            notices=notices,
             image_urls=images,
             images=role_images,
-            image_refs=coupang_image_refs(row, self.channel),
+            image_refs=image_refs,
             completeness=Completeness(
                 status=status,
-                missing_fields=tuple(missing),
-                reasons=("provider_content_fields_missing",) if missing else (),
+                missing_fields=tuple(dict.fromkeys(missing)),
+                reasons=tuple(dict.fromkeys(reasons)),
             ),
             source=self._source(
                 observed_at,

@@ -203,7 +203,9 @@ async def test_naver_invalid_or_duplicate_rows_fail_closed(rows):
         {"vendorItemId": 456, "amountInStock": -1},
     ],
 )
-async def test_inventory_mismatch_or_malformed_stock_fails_closed(inventory):
+async def test_inventory_mismatch_or_malformed_stock_falls_back_to_list_level(
+    inventory,
+):
     adapter = coupang(
         {
             "sellerProductId": 123,
@@ -221,8 +223,12 @@ async def test_inventory_mismatch_or_malformed_stock_fails_closed(inventory):
     result = await CommerceService(AdapterRegistry([adapter])).get_product_detail(
         Channel.COUPANG_GENERAL, "123", include_option_inventory=True
     )
-    assert result.status is ResultStatus.UNAVAILABLE
-    assert result.item is None
+    assert result.status is ResultStatus.INCOMPLETE
+    assert result.item is not None
+    assert result.item.options == ()
+    assert result.item.unsupported_detail_api is True
+    assert result.item.unsupported_detail_reason
+    assert "unsupported_detail_api" in result.reasons
 
 
 async def test_missing_id_does_not_create_an_option_by_position():

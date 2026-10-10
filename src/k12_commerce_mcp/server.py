@@ -21,6 +21,7 @@ from .adapters.naver.adapter import NaverAdapter
 from .adapters.toss import TossShoppingAdapter
 from .clients.coupang import CoupangClient, rg_order_collection_mode
 from .clients.elevenst import ElevenstClient, public_category_client
+from .clients.elevenst_seller import ElevenstSellerClient
 from .clients.naver import NaverClient
 from .clients.product_assets import fetch_product_image
 from .clients.toss import TossShoppingClient
@@ -114,7 +115,17 @@ from .documented_change_mcp import (
     simulate_documented_change,
 )
 from .elevenst_public_categories import ElevenstPublicCategoryPage, category_page
+from .elevenst_registered_defaults import ElevenstRegisteredDefaults, registered_defaults
+from .elevenst_seller_reads import (
+    ElevenstCategoryList,
+    ElevenstProductLookup,
+    ElevenstRegistrationOptions,
+    category_list,
+    product_lookup,
+    registration_options,
+)
 from .image_assets import IMAGE_ASSETS, ImageAssetError
+from .mall_listing_status import register_mall_listing_status_tool
 from .models import (
     CanonicalCommonProduct,
     CapabilitiesResult,
@@ -221,6 +232,10 @@ from .publishing import (
     CoupangCanonicalDraft,
     CoupangProductPublisher,
     CoupangPublishResult,
+    ElevenstApprovalEvidence,
+    ElevenstCanonicalDraft,
+    ElevenstProductPublisher,
+    ElevenstPublishResult,
     NaverApprovalEvidence,
     NaverCanonicalDraft,
     NaverProductPublisher,
@@ -250,6 +265,14 @@ from .shipment_history_mcp import ShipmentHistory, ShipmentHistoryClient, shipme
 from .simulations.full_api_contract import FullApiContract
 from .synthetic import build_synthetic_adapter
 from .toss_price_compare import TossPriceComparePage, price_compare_page
+from .toss_registration_reads import (
+    TossNoticeCategoryList,
+    TossNoticeItemList,
+    TossRegistrationLocations,
+    notice_categories,
+    notice_items,
+    registration_locations,
+)
 
 SERVER_NAME = "k12-commerce"
 SERVER_VERSION = "0.1.0"
@@ -284,12 +307,20 @@ AGENT_VISIBLE_MODELS: tuple[type[BaseModel], ...] = (
     NaverPublishResult,
     CoupangPublishResult,
     TossPublishResult,
+    ElevenstPublishResult,
     MarketplaceReadinessResult,
     MarketplaceCategoryResult,
     MarketplaceCategoryRequirementResult,
     MarketplaceRegistrationResourceResult,
     ElevenstPublicCategoryPage,
+    ElevenstRegistrationOptions,
+    ElevenstProductLookup,
+    ElevenstCategoryList,
+    ElevenstRegisteredDefaults,
     TossPriceComparePage,
+    TossNoticeCategoryList,
+    TossNoticeItemList,
+    TossRegistrationLocations,
     RgRfmCategoryPage,
     RgCategoryMetaResult,
     NaverReferencePage,
@@ -388,8 +419,11 @@ def build_server(
     naver_publisher: NaverProductPublisher | None = None,
     coupang_publisher: CoupangProductPublisher | None = None,
     toss_publisher: TossProductPublisher | None = None,
+    elevenst_publisher: ElevenstProductPublisher | None = None,
     elevenst_public_client: ElevenstClient | None = None,
+    elevenst_seller_client: ElevenstSellerClient | None = None,
     toss_price_compare_client: TossShoppingClient | None = None,
+    toss_registration_client: TossShoppingClient | None = None,
     rg_category_client: RgCategoryClient | None = None,
     rg_meta_client: RgMetaClient | None = None,
     naver_reference_client: NaverClient | None = None,
@@ -431,12 +465,19 @@ def build_server(
             "coupang": _executor_configured(coupang_publisher),
             "naver": _executor_configured(naver_publisher),
             "toss": _executor_configured(toss_publisher),
+            "11st": _executor_configured(elevenst_publisher),
         }
     )
     server = MCPServer(SERVER_NAME, version=SERVER_VERSION)
     # Both legacy injection parameters above are inert for local-only denials.
     register_coupon_order_item_blocks(server, READ_ONLY_ANNOTATIONS)
     register_catalog_product_tools(server, naver_reference_client, READ_ONLY_ANNOTATIONS)
+    register_mall_listing_status_tool(
+        server,
+        toss_client=toss_registration_client,
+        naver_client=naver_reference_client,
+        annotations=READ_ONLY_ANNOTATIONS,
+    )
     register_remaining_independent_get_blocks(server, READ_ONLY_ANNOTATIONS)
     register_naver_inquiry_order_get_blocks(server, READ_ONLY_ANNOTATIONS)
     register_naver_settle_category_address_tools(
@@ -507,10 +548,34 @@ def build_server(
                     "commerce_simulate_documented_change",
                 }
             )
-        if channel is Channel.TOSS_STORE and toss_price_compare_client is not None:
-            connected_specials.add("commerce_get_toss_price_compare_products")
-        elif channel is Channel.ELEVENST and elevenst_public_client is not None:
-            connected_specials.add("commerce_get_elevenst_public_categories")
+        if channel is Channel.TOSS_STORE:
+            if toss_price_compare_client is not None:
+                connected_specials.add("commerce_get_toss_price_compare_products")
+            if toss_registration_client is not None:
+                connected_specials.update(
+                    {
+                        "commerce_get_toss_notice_categories",
+                        "commerce_get_toss_notice_items",
+                        "commerce_get_toss_registration_locations",
+                        "commerce_get_mall_listing_status",
+                    }
+                )
+        elif channel is Channel.ELEVENST:
+            if elevenst_public_client is not None:
+                connected_specials.update(
+                    {
+                        "commerce_get_elevenst_public_categories",
+                        "commerce_get_elevenst_categories",
+                    }
+                )
+            if elevenst_seller_client is not None:
+                connected_specials.update(
+                    {
+                        "commerce_get_elevenst_registration_options",
+                        "commerce_get_elevenst_product",
+                        "commerce_get_elevenst_registered_defaults",
+                    }
+                )
         elif channel is Channel.COUPANG_ROCKET_GROWTH:
             if rg_category_client is not None:
                 connected_specials.add("commerce_get_rg_rfm_category_page")
@@ -545,6 +610,7 @@ def build_server(
                     "commerce_get_naver_product_model",
                     "commerce_get_naver_standard_options",
                     "commerce_get_naver_purchase_option_guides",
+                    "commerce_get_mall_listing_status",
                 }
             )
         elif channel is Channel.COUPANG_GENERAL:
@@ -819,9 +885,16 @@ def build_server(
         channel: Channel,
         page_size: Annotated[int, Field(ge=1, le=100)] = 50,
         cursor: str | None = None,
+        business_date: date | None = None,
     ) -> FeePageResult:
-        """Return only fee values actually reported by the marketplace API."""
-        return await commerce.get_fees(channel, page_size=page_size, cursor=cursor)
+        """Return only fee values actually reported by the marketplace API.
+
+        business_date (KST pay date) narrows the Naver commission read to that
+        day; other channels ignore it.
+        """
+        return await commerce.get_fees(
+            channel, page_size=page_size, cursor=cursor, business_date=business_date
+        )
 
     @server.tool(
         name="commerce_normalize_naver_keyword_pack",
@@ -1013,22 +1086,55 @@ def build_server(
         ("commerce_get_naver_attribute_values", "attribute_value"),
         ("commerce_get_naver_attribute_units", "attribute_unit"),
     )
+    reference_docs = {
+        "brand": (
+            "Read GET /v1/product-brands; query = brand name "
+            "(required, 80 chars max)."
+        ),
+        "manufacturer": (
+            "Read GET /v1/product-manufacturers; query = manufacturer name "
+            "(required, 80 chars max)."
+        ),
+        "origin_all": "Read GET /v1/product-origin-areas; query must be omitted.",
+        "origin_query_name": (
+            "Read GET /v1/product-origin-areas/query; "
+            "query = origin area name (required)."
+        ),
+        "origin_sub": (
+            "Read GET /v1/product-origin-areas/sub-origin-areas; "
+            "query = parent area code (optional)."
+        ),
+        "attribute": (
+            "Read GET /v1/product-attributes/attributes; "
+            "query = numeric categoryId (required, e.g. from "
+            "commerce_get_naver_subcategories)."
+        ),
+        "attribute_value": (
+            "Read GET /v1/product-attributes/attribute-values; "
+            "query = numeric categoryId (required)."
+        ),
+        "attribute_unit": (
+            "Read GET /v1/product-attributes/attribute-value-units; "
+            "query must be omitted."
+        ),
+    }
 
     def register_reference_tool(tool_name: str, fixed_kind: str) -> None:
-        @server.tool(
-            name=tool_name,
-            annotations=READ_ONLY_ANNOTATIONS,
-            structured_output=True,
-        )
         async def read_reference(
             query: Annotated[str | None, Field(max_length=80)] = None,
             page_size: Annotated[int, Field(ge=1, le=100)] = 100,
             cursor: Annotated[str | None, Field(pattern=r"^(?:0|[1-9][0-9]{0,5})$")] = None,
         ) -> NaverReferencePage:
-            """Read one documented Naver reference GET with safe bounded projection."""
             return await commerce_get_naver_reference_page(
                 fixed_kind, query=query, page_size=page_size, cursor=cursor
             )
+
+        read_reference.__doc__ = reference_docs[fixed_kind]
+        server.tool(
+            name=tool_name,
+            annotations=READ_ONLY_ANNOTATIONS,
+            structured_output=True,
+        )(read_reference)
 
     for reference_tool_name, reference_kind in reference_tools:
         register_reference_tool(reference_tool_name, reference_kind)
@@ -1124,6 +1230,8 @@ def build_server(
     ) -> BundleSingle:
         """Read GET /v1/product-delivery-info/bundle-groups/:deliveryBundleGroupId.
         Operation: get-delivery-bundle-group-product.
+        deliveryBundleGroupId: int64 id from commerce_get_naver_delivery_bundle_groups;
+        a digit string is also accepted.
         """
         return await read_bundle_single(naver_reference_client, deliveryBundleGroupId)
 
@@ -1184,7 +1292,10 @@ def build_server(
     async def commerce_get_naver_size_type(
         sizeTypeId: Annotated[Any, Field(json_schema_extra={"type": "integer"})],
     ) -> NaverSingleRead:
-        """get-size-type-vo-product GET /v1/product-sizes/:sizeTypeId; closed single object."""
+        """get-size-type-vo-product GET /v1/product-sizes/:sizeTypeId; closed single object.
+        sizeTypeId: int64 id from commerce_get_naver_size_types;
+        a digit string is also accepted.
+        """
         return await read_size_type(naver_reference_client, sizeTypeId)
 
     @server.tool(annotations=READ_ONLY_ANNOTATIONS, structured_output=True)
@@ -2021,7 +2132,11 @@ def build_server(
         max_per_page: int | None = None,
         next_token: str | None = None,
     ) -> ExchangePage:
-        """Read GET /v4/vendors/{vendorId}/exchangeRequests; never return customer data."""
+        """Read GET /v4/vendors/{vendorId}/exchangeRequests; never return customer data.
+        created_at_from/created_at_to: local datetimes YYYY-MM-DDTHH:MM:SS (no
+        timezone suffix; date-only and minute-precision forms are rejected)
+        spanning a window shorter than 7 days. Claim ids are opaque digests.
+        """
         return await read_exchange_requests(
             coupang_claim_list_client,
             created_at_from=created_at_from,
@@ -2043,7 +2158,10 @@ def build_server(
         page_index: int = 1,
         size_per_page: int = 10,
     ) -> WithdrawPage:
-        """Read GET /v4/vendors/{vendorId}/returnWithdrawRequests without customer data."""
+        """Read GET /v4/vendors/{vendorId}/returnWithdrawRequests without customer data.
+        date_from/date_to: YYYY-MM-DD spanning at most 7 inclusive days.
+        Claim and item ids are opaque digests.
+        """
         return await read_return_withdraw_requests(
             coupang_claim_list_client,
             date_from=date_from,
@@ -2115,6 +2233,104 @@ def build_server(
         return await commerce.get_marketplace_registration_resources(Channel(channel))
 
     @server.tool(
+        name="commerce_get_elevenst_registration_options",
+        annotations=READ_ONLY_ANNOTATIONS,
+        structured_output=True,
+    )
+    async def commerce_get_elevenst_registration_options() -> ElevenstRegistrationOptions:
+        """Read 11st seller registration selectors; no address or contact data."""
+        return await registration_options(elevenst_seller_client)
+
+    @server.tool(
+        name="commerce_get_elevenst_product",
+        annotations=READ_ONLY_ANNOTATIONS,
+        structured_output=True,
+    )
+    async def commerce_get_elevenst_product(
+        product_no: Annotated[str, Field(pattern=r"^[1-9][0-9]{0,19}$")],
+    ) -> ElevenstProductLookup:
+        """Read one 11st seller product summary by product number."""
+        return await product_lookup(elevenst_seller_client, product_no)
+
+    @server.tool(
+        name="commerce_get_elevenst_categories",
+        annotations=READ_ONLY_ANNOTATIONS,
+        structured_output=True,
+    )
+    async def commerce_get_elevenst_categories() -> ElevenstCategoryList:
+        """Read the unauthenticated 11st category list with leaf flags."""
+        return await category_list(elevenst_public_client)
+
+    @server.tool(
+        name="commerce_get_elevenst_registered_defaults",
+        annotations=READ_ONLY_ANNOTATIONS,
+        structured_output=True,
+    )
+    async def commerce_get_elevenst_registered_defaults(
+        product_nos: Annotated[
+            list[Annotated[str, Field(pattern=r"^[1-9][0-9]{0,19}$")]],
+            Field(max_length=20),
+        ] = [],  # noqa: B006 - MCP tool schema default
+        seller_product_codes: Annotated[
+            list[Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,40}$")]],
+            Field(max_length=10),
+        ] = [],  # noqa: B006 - MCP tool schema default
+    ) -> ElevenstRegisteredDefaults:
+        """Most-used seller-policy values across our registered 11st products (GET 1620/1621).
+
+        product_nos: 11st product numbers (max 20); seller_product_codes: seller product
+        codes resolved by GET 1621 (max 10). 11st has no GET list of our own products, so
+        with neither argument nothing is called and sample_count is 0. Each field returns
+        {value, count, candidates, conflict}. Seller-published A/S and return text may carry
+        the company phone number; buyer data, addresses and HTML are never read.
+        """
+        return await registered_defaults(
+            elevenst_seller_client,
+            product_nos=product_nos,
+            seller_product_codes=seller_product_codes,
+        )
+
+    @server.tool(
+        name="commerce_get_toss_notice_categories",
+        annotations=READ_ONLY_ANNOTATIONS,
+        structured_output=True,
+    )
+    async def commerce_get_toss_notice_categories() -> TossNoticeCategoryList:
+        """Toss 상품정보제공고시 카테고리 코드 목록 (GET notices/category-codes).
+
+        items: [{category_code, name, first_category_name, second_category_name}].
+        """
+        return await notice_categories(toss_registration_client)
+
+    @server.tool(
+        name="commerce_get_toss_notice_items",
+        annotations=READ_ONLY_ANNOTATIONS,
+        structured_output=True,
+    )
+    async def commerce_get_toss_notice_items(
+        category_code: Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")],
+    ) -> TossNoticeItemList:
+        """Toss 고시 항목 목록 for one category code (GET notices?categoryCode=).
+
+        items: [{notice_id, title, order, required, required_basis, default_hint}] — titles
+        only; content is the seller's to fill.
+        """
+        return await notice_items(toss_registration_client, category_code)
+
+    @server.tool(
+        name="commerce_get_toss_registration_locations",
+        annotations=READ_ONLY_ANNOTATIONS,
+        structured_output=True,
+    )
+    async def commerce_get_toss_registration_locations() -> TossRegistrationLocations:
+        """Toss 배송비 묶음 그룹·교환반품지 번호 (GET .../delivery-location/v2,
+        GET .../exchange-refund-location/v2).
+
+        Only {location_id, name, is_main} — never address, zip code or contact text.
+        """
+        return await registration_locations(toss_registration_client)
+
+    @server.tool(
         name="commerce_publish_naver_product",
         annotations=WRITE_ANNOTATIONS,
         structured_output=True,
@@ -2159,6 +2375,23 @@ def build_server(
             raise ValueError("Toss publication executor is not configured")
         return await toss_publisher.publish(draft, approval, idempotency_key=idempotency_key)
 
+    @server.tool(
+        name="commerce_publish_elevenst_product",
+        annotations=WRITE_ANNOTATIONS,
+        structured_output=True,
+    )
+    async def commerce_publish_elevenst_product(
+        draft: ElevenstCanonicalDraft,
+        approval: ElevenstApprovalEvidence,
+        idempotency_key: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")],
+    ) -> ElevenstPublishResult:
+        """Publish one approved canonical draft to 11st (euc-kr XML) and verify it by GET."""
+        if elevenst_publisher is None:
+            raise ValueError("11st publication executor is not configured")
+        return await elevenst_publisher.publish(
+            draft, approval, idempotency_key=idempotency_key
+        )
+
     return server
 
 
@@ -2188,8 +2421,21 @@ def build_live_server(
         naver_publisher=publishers.naver,
         coupang_publisher=publishers.coupang,
         toss_publisher=publishers.toss,
-        elevenst_public_client=elevenst_public_client,
+        elevenst_publisher=publishers.elevenst,
+        elevenst_public_client=(
+            elevenst_public_client
+            if elevenst_public_client is not None
+            else public_category_client()
+        ),
+        elevenst_seller_client=(
+            ElevenstSellerClient(credentials.elevenst)
+            if credentials.elevenst is not None
+            else None
+        ),
         toss_price_compare_client=(
+            TossShoppingClient(credentials.toss) if credentials.toss is not None else None
+        ),
+        toss_registration_client=(
             TossShoppingClient(credentials.toss) if credentials.toss is not None else None
         ),
         rg_category_client=(
@@ -2265,10 +2511,11 @@ def main() -> None:
 
 
 def public_elevenst_main() -> None:
-    """Opt in to unauthenticated public category GETs on local stdio only.
+    """Opt in to the public 11st category GETs on local stdio over HTTPS.
 
-    Seller 11st reads and mutations remain disabled; HTTP has no transport
-    confidentiality, so never attach a credential to this client.
+    The public client carries no credential; authenticated seller reads are
+    composed only when ``DOR_11ST_API_KEY`` is present in the credential
+    file, and mutations stay disabled.
     """
     build_live_server(elevenst_public_client=public_category_client()).run()
 

@@ -106,7 +106,12 @@ class NaverOrdersMixin:
             product_order_id,
         )
         external_product_id = product.get("productId")
-        option_id = product.get("optionCode")
+        # 공식 상품 주문 정보 구조체에는 optionCode 가 없고, 옵션 상품을 구분하는 값은
+        # itemNo(옵션·추가 상품 등록 시 자동 생성된 아이템 번호)다. Supabase 연결 표의
+        # naver_item_no 와 같은 값. optionCode 는 예전 이름 호환으로만 남긴다(CTO 2026-10-06).
+        option_id = product.get("itemNo")
+        if option_id in (None, ""):
+            option_id = product.get("optionCode")
         product_name = product.get("productName")
         option_name = product.get("productOption")
         line = OrderLine(

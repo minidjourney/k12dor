@@ -57,6 +57,15 @@ def _valid_id(value: object, upper: int) -> bool:
     return type(value) is int and 1 <= value <= upper
 
 
+def _id_arg(value: object) -> int | None:
+    """Int path id; also accept the digit-string form list projections emit."""
+    if type(value) is int:
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
 def _valid_name(value: object) -> bool:
     return (
         isinstance(value, str)
@@ -97,14 +106,15 @@ def _project(payload: object) -> NaverSingleRead:
 
 
 async def read_size_type(client: Any | None, size_type_id: object) -> NaverSingleRead:
-    if not _valid_id(size_type_id, 2**63 - 1):
+    parsed = _id_arg(size_type_id)
+    if parsed is None or not 1 <= parsed <= 2**63 - 1:
         return _result(SIZE_OP, "invalid_request", "invalid_request")
     if client is None:
         return _result(SIZE_OP, "unavailable", "client_not_configured")
     try:
         payload = await client._request(
             "GET",
-            SIZE_PATH.format(size_type_id=size_type_id),
+            SIZE_PATH.format(size_type_id=parsed),
             query=None,
             access_token=await client._access_token(),
         )

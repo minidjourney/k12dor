@@ -683,7 +683,7 @@ async def test_missing_or_non_string_category_id_does_not_dispatch(arguments, mo
         (CHANNEL_TOOL, "channelProductNo", INT64_MAX + 1),
         (CHANNEL_TOOL, "channelProductNo", True),
         (CHANNEL_TOOL, "channelProductNo", 1.5),
-        (CHANNEL_TOOL, "channelProductNo", "88000001"),
+        (CHANNEL_TOOL, "channelProductNo", "88x00001"),
         (ORIGIN_TOOL, "originProductNo", 0),
         (ORIGIN_TOOL, "originProductNo", INT64_MIN),
         (ORIGIN_TOOL, "originProductNo", None),

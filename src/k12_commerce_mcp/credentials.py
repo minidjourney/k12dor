@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .clients.coupang import CoupangCredentials
+from .clients.elevenst_seller import ElevenstCredentials
 from .clients.naver import NaverCredentials
 from .clients.toss import TossShoppingCredentials
 
@@ -24,13 +25,15 @@ class MarketplaceCredentials:
     coupang: CoupangCredentials | None = None
     naver: NaverCredentials | None = None
     toss: TossShoppingCredentials | None = None
+    elevenst: ElevenstCredentials | None = None
 
     def __repr__(self) -> str:
         return (
             "MarketplaceCredentials("
             f"coupang_configured={self.coupang is not None}, "
             f"naver_configured={self.naver is not None}, "
-            f"toss_configured={self.toss is not None})"
+            f"toss_configured={self.toss is not None}, "
+            f"elevenst_configured={self.elevenst is not None})"
         )
 
 
@@ -89,4 +92,15 @@ def load_marketplace_credentials(
     toss = None
     if all(values.get(name) for name in toss_names):
         toss = TossShoppingCredentials(*(values[name] for name in toss_names))
-    return MarketplaceCredentials(coupang=coupang, naver=naver, toss=toss)
+    elevenst = None
+    elevenst_key = values.get("DOR_11ST_API_KEY")
+    if elevenst_key:
+        try:
+            elevenst = ElevenstCredentials(elevenst_key)
+        except ValueError:
+            # An out-of-shape key value is treated as not configured; the
+            # rejected value is never raised, logged, or stored.
+            elevenst = None
+    return MarketplaceCredentials(
+        coupang=coupang, naver=naver, toss=toss, elevenst=elevenst
+    )

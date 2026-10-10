@@ -232,6 +232,7 @@ async def test_configured_toss_registers_only_order_read_capability_without_prov
         "commerce_publish_naver_product",
         "commerce_publish_coupang_product",
         "commerce_publish_toss_product",
+        "commerce_publish_elevenst_product",
     ]
     active = {
         row["tool_name"]
@@ -247,9 +248,13 @@ async def test_configured_toss_registers_only_order_read_capability_without_prov
         "commerce_get_returns",
         "commerce_get_settlements",
         "commerce_get_toss_price_compare_products",
+        "commerce_get_toss_notice_categories",
+        "commerce_get_toss_notice_items",
+        "commerce_get_toss_registration_locations",
         "commerce_get_marketplace_categories",
         "commerce_get_marketplace_category_requirements",
         "commerce_get_marketplace_registration_resources",
+        "commerce_get_mall_listing_status",
         *LOCAL_PROVIDER_METHOD_TOOL_NAMES,
     }
 

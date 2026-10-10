@@ -739,7 +739,7 @@ async def test_single_binds_exact_path_and_projects_object(group_id):
         {"deliveryBundleGroupId": 0},
         {"deliveryBundleGroupId": -1},
         {"deliveryBundleGroupId": True},
-        {"deliveryBundleGroupId": "1"},
+        {"deliveryBundleGroupId": "1x"},
         {"deliveryBundleGroupId": INT64_MAX + 1},
     ],
 )

@@ -117,9 +117,11 @@ class NaverRegistrationMixin:
             )
         groups = container.get("standardOptionCategoryGroups")
         if groups is None:
-            raise AdapterInvalidResponseError(
-                "naver standard options response shape is invalid"
-            )
+            if flag is not False:
+                raise AdapterInvalidResponseError(
+                    "naver standard options response shape is invalid"
+                )
+            groups = []
         return MarketplaceCategoryRequirements(
             channel=Channel.NAVER,
             category_id=parsed,

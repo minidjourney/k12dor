@@ -67,6 +67,38 @@ def test_runtime_value_gate_rejects_sensitive_keys(unsafe_key: str) -> None:
         assert_agent_safe_value({unsafe_key: "synthetic"})
 
 
+@pytest.mark.parametrize(
+    "catalog",
+    [
+        {"external_option_ids": ["1712345678", "1012345678"]},
+        {"external_option_id": "1612345678"},
+        {"external_product_id": "1912345678"},
+        {"external_option_ids": [1712345678]},
+    ],
+)
+def test_runtime_value_gate_allows_phone_shaped_catalog_ids(catalog: dict) -> None:
+    # 몰 상품·옵션 번호는 판매자 카탈로그 번호다.
+    # 10자리가 휴대폰 모양이어도 상품 읽기를 막지 않는다.
+    assert_agent_safe_value(catalog)
+
+
+@pytest.mark.parametrize(
+    "unsafe",
+    [
+        {"external_option_ids": ["010-1234-5678"]},
+        {"external_option_ids": ["1712345678 synthetic.person@example.invalid"]},
+        {"external_option_id": "+82 10 1234 5678"},
+        {"name": "1712345678"},
+        {"option_name": "1012345678"},
+        {"external_option_ids": [["1712345678"]]},
+    ],
+)
+def test_runtime_value_gate_catalog_exemption_is_exact(unsafe: dict) -> None:
+    # 예외는 정해진 칸 이름 + 숫자만 1~20자일 때뿐 — 다른 칸·다른 모양은 그대로 막는다.
+    with pytest.raises(PiiValueError):
+        assert_agent_safe_value(unsafe)
+
+
 async def test_mcp_rejects_unsafe_adapter_value_without_echoing_it() -> None:
     seed = build_synthetic_adapter()
     page = await seed.get_products(page_size=1)

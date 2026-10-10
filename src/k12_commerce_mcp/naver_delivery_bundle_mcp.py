@@ -202,6 +202,8 @@ async def read_bundle_list(
 
 async def read_bundle_single(client: NaverClient | None, group_id: object) -> BundleSingle:
     invalid = _single
+    if isinstance(group_id, str) and group_id.isdigit():
+        group_id = int(group_id)
     if not _valid_int(group_id, 1, MAX64):
         return invalid("invalid_request", "invalid_request")
     if client is None:

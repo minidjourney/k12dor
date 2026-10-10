@@ -27,14 +27,24 @@ from ...models import (
     ResultStatus,
 )
 from ...models.products import ProductImage, ProductImageReference
-from ...product_images import body_images, body_reference_urls, unique_images
+from ...product_images import (
+    body_reference_urls,
+    unique_images,
+)
 from ...product_options import naver_option_image_groups, naver_options
 from ...security import UNSAFE_VALUE_PATTERNS, is_agent_safe_value
 from ..base import (
     AdapterInvalidCursorError,
     AdapterInvalidResponseError,
 )
-from .mapper import _first_text, _product_state, _safe_detail_html
+from .mapper import (
+    _detail_markup,
+    _detail_src_scan,
+    _first_text,
+    _notice_items,
+    _product_state,
+    _safe_detail_html,
+)
 
 _CATEGORY_ID_KEYS = ("leafCategoryId", "categoryId")
 _CATEGORY_NAME_KEYS = ("name", "categoryName", "leafCategoryName")
@@ -85,9 +95,28 @@ def _withhold_phone_like_asset_url(value: str) -> bool:
     if [i for i, pattern in enumerate(UNSAFE_VALUE_PATTERNS) if pattern.search(value)] != [1]:
         return False
     return re.fullmatch(
-        r"https://(?:shop-phinf|shopping-phinf)\.pstatic\.net/[A-Za-z0-9_./-]+",
+        r"https://(?:[A-Za-z0-9-]+\.)*(?:pstatic\.net|naver\.net)/[A-Za-z0-9_./-]+",
         value,
     ) is not None
+
+
+_NAVER_IMAGE_URL = re.compile(
+    r"https://(?:[A-Za-z0-9-]+\.)*(?:pstatic\.net|naver\.net)/[^\s<>\\]+\Z"
+)
+
+
+def _detail_html_src(value: str) -> str | None:
+    """Naver CDN detail images pass; other hosts stay withheld."""
+    if (
+        not isinstance(value, str)
+        or len(value) > 2048
+        or _NAVER_IMAGE_URL.fullmatch(value) is None
+        or _withhold_phone_like_asset_url(value)
+    ):
+        return None
+    if not is_agent_safe_value(value):
+        raise AdapterInvalidResponseError("detail image is not agent-safe")
+    return value
 
 
 class NaverProductsMixin:
@@ -390,12 +419,14 @@ class NaverProductsMixin:
         html = row.get("detailContent")
         if not isinstance(html, str) and isinstance(origin, dict):
             html = origin.get("detailContent")
-        detail_urls, detail_withheld = body_images(html)
-        for url in detail_urls:
-            if _withhold_phone_like_asset_url(url):
-                detail_withheld = True
-            else:
-                classified.append(ProductImage(url=url, role="detail"))
+        detail_html, html_unsafe, html_truncated = _detail_markup(
+            html, check_src=_detail_html_src
+        )
+        notice_containers = (row, origin) if isinstance(origin, dict) else (row,)
+        notices, notices_withheld = _notice_items(notice_containers)
+        detail_urls, detail_withheld = _detail_src_scan(html, _detail_html_src)
+        detail_withheld = detail_withheld or html_unsafe
+        classified.extend(ProductImage(url=url, role="detail") for url in detail_urls)
         references = []
         reference_rows = [
             (image["url"], role)
@@ -434,6 +465,19 @@ class NaverProductsMixin:
         if description is None:
             missing.append("description_text")
             reasons.append("provider_content_fields_missing")
+        if detail_html is None or html_unsafe or html_truncated:
+            missing.append("detail_html")
+        if html_unsafe:
+            reasons.append("unsafe_detail_html_withheld")
+        if html_truncated:
+            reasons.append("detail_html_truncated")
+        if not notices:
+            missing.append("notices")
+            if "provider_content_fields_missing" not in reasons:
+                reasons.append("provider_content_fields_missing")
+        if notices_withheld:
+            missing.append("notice_values")
+            reasons.append("notice_values_withheld")
         if not image_urls or withheld:
             missing.append("image_urls")
             if not withheld and "provider_content_fields_missing" not in reasons:
@@ -448,13 +492,15 @@ class NaverProductsMixin:
             external_product_id=external_product_id,
             title=title,
             description_text=description,
+            detail_html=detail_html,
+            notices=notices,
             image_urls=image_urls,
             images=classified_images,
             image_refs=image_refs,
             completeness=Completeness(
                 status=ResultStatus.COMPLETE if not missing else ResultStatus.INCOMPLETE,
-                missing_fields=tuple(missing),
-                reasons=tuple(reasons),
+                missing_fields=tuple(dict.fromkeys(missing)),
+                reasons=tuple(dict.fromkeys(reasons)),
             ),
             source=self._source("naver:v2/products/channel-products", "provider_product_content"),
         )

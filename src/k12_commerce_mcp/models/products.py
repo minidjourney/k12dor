@@ -11,6 +11,7 @@ from .common import (
     Completeness,
     Money,
     ProductState,
+    ResultStatus,
     SourceEvidence,
 )
 
@@ -248,6 +249,27 @@ class ProductImageReference(CanonicalModel):
     external_option_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
+class TossProductNoticeItem(CanonicalModel):
+    """One registered Toss notice item (상품정보제공고시) — id, title and the seller's content."""
+
+    id: int = Field(ge=0)
+    title: str | None = Field(default=None, min_length=1, max_length=500)
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class TossProductNotice(CanonicalModel):
+    """Registered Toss notice (OPUS-4 워커 C): only Agent-safe item contents ride here.
+
+    Items whose content fails the Agent-safety scan (e.g. a landline number in the
+    A/S item) are not copied; their ids are listed in ``withheld_item_ids`` so a
+    caller knows the item exists and can fill it from another source.
+    """
+
+    category_code: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    items: tuple[TossProductNoticeItem, ...] = Field(default=(), max_length=100)
+    withheld_item_ids: tuple[int, ...] = Field(default=(), max_length=100)
+
+
 class ProductOption(CanonicalModel):
     """One observed provider option with field-local stock provenance."""
 
@@ -255,7 +277,11 @@ class ProductOption(CanonicalModel):
     external_product_id: str = Field(min_length=1, max_length=200)
     external_option_id: str = Field(pattern=r"^[0-9]{1,20}$")
     name: str | None = Field(default=None, min_length=1, max_length=1000)
-    attributes: tuple[ProductAttribute, ...] = Field(default=(), max_length=30)
+    # Coupang vendor items legitimately carry many attributeTypeName/
+    # attributeValueName pairs and the official docs publish no hard maximum;
+    # 50 is a local safety bound, not a verified provider limit. Anything
+    # beyond it degrades to ProductDetail.unsupported_detail_api, not failure.
+    attributes: tuple[ProductAttribute, ...] = Field(default=(), max_length=50)
     listing_price: Money | None = None
     base_listing_price: Money | None = None
     provider_option_price: Money | None = None
@@ -321,8 +347,13 @@ class ProductDetail(CanonicalModel):
     attributes: tuple[ProductAttribute, ...] = ()
     registration_template: TossRegistrationTemplate | None = None
     registration_template_candidate: TossRegistrationTemplateCandidate | None = None
+    # Toss only (OPUS-4): the registered notice and tax-free flag of an existing product.
+    notice: TossProductNotice | None = None
+    is_tax_free: bool | None = None
     naver_delivery_template: NaverDeliveryPolicyTemplate | None = None
     naver_delivery_template_candidate: NaverDeliveryPolicyTemplateCandidate | None = None
+    unsupported_detail_api: bool = False
+    unsupported_detail_reason: str | None = Field(default=None, max_length=200)
     completeness: Completeness
     source: SourceEvidence
 
@@ -330,6 +361,10 @@ class ProductDetail(CanonicalModel):
     def require_verified_master_sku_link(self) -> Self:
         if (self.master_sku is not None) != self.master_sku_link_verified:
             raise ValueError("master_sku requires a verified link")
+        if self.unsupported_detail_api != (self.unsupported_detail_reason is not None):
+            raise ValueError("unsupported_detail_api requires a reason")
+        if self.unsupported_detail_api and self.completeness.status is ResultStatus.COMPLETE:
+            raise ValueError("unsupported detail fallback is never complete")
         return self
 
 class ProductImage(CanonicalModel):
@@ -340,11 +375,21 @@ class ProductImage(CanonicalModel):
     external_option_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
+class ProductContentNotice(CanonicalModel):
+    """One provider notice entry; value stays null when absent or withheld."""
+
+    category: str | None = Field(default=None, min_length=1, max_length=200)
+    name: str = Field(min_length=1, max_length=200)
+    value: str | None = Field(default=None, max_length=2_000)
+
+
 class ProductContent(CanonicalModel):
     channel: Channel
     external_product_id: str = Field(min_length=1, max_length=200)
     title: str = Field(min_length=1, max_length=1000)
     description_text: str | None = Field(default=None, max_length=100_000)
+    detail_html: str | None = Field(default=None, max_length=100_000)
+    notices: tuple[ProductContentNotice, ...] = Field(default=(), max_length=500)
     image_urls: tuple[str, ...] = ()
     images: tuple[ProductImage, ...] = Field(default=(), max_length=100)
     image_refs: tuple[ProductImageReference, ...] = Field(default=(), max_length=100)

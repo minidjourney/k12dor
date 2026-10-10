@@ -1,8 +1,8 @@
 """Synthetic-transport tests for the public 11st category client.
 
 Scope: the two documented unauthenticated GET XML endpoints only —
-http://api.11st.co.kr/rest/cateservice/category and
-http://api.11st.co.kr/rest/cateservice/category/{dispCtgrNo}. Every test
+https://api.11st.co.kr/rest/cateservice/category and
+https://api.11st.co.kr/rest/cateservice/category/{dispCtgrNo}. Every test
 injects httpx.MockTransport; no live provider traffic is permitted and no
 credentials or seller endpoints exist in this client.
 """
@@ -236,11 +236,11 @@ async def test_subcategories_rejects_non_string_id(disp_ctgr_no: object) -> None
     [
         ("POST", CATEGORY_LIST_URL),
         ("DELETE", CATEGORY_LIST_URL),
-        ("GET", "https://api.11st.co.kr/rest/cateservice/category"),
-        ("GET", "http://api.11st.co.kr/rest/sellerservice/orders"),
-        ("GET", "http://attacker.invalid/rest/cateservice/category"),
-        ("GET", "http://api.11st.co.kr/rest/cateservice/category/"),
-        ("GET", "http://api.11st.co.kr/rest/cateservice/category/abc"),
+        ("GET", "http://api.11st.co.kr/rest/cateservice/category"),
+        ("GET", "https://api.11st.co.kr/rest/sellerservice/orders"),
+        ("GET", "https://attacker.invalid/rest/cateservice/category"),
+        ("GET", "https://api.11st.co.kr/rest/cateservice/category/"),
+        ("GET", "https://api.11st.co.kr/rest/cateservice/category/abc"),
     ],
 )
 async def test_request_off_allowlist_fails_closed(method: str, url: str) -> None:

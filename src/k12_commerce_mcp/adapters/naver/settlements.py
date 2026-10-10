@@ -191,8 +191,12 @@ class NaverSettlementsMixin:
         *,
         page_size: int,
         cursor: str | None = None,
+        business_date: date | None = None,
     ) -> MockPage[Fee]:
-        day = self._day()
+        # Default stays "yesterday (KST)". A caller may ask for a specific pay
+        # date: Naver posts commission-details a few days after payment, so
+        # DOR sweeps recent pay dates instead of only yesterday.
+        day = business_date or self._day()
         page = await self.client.list_commission_details(
             search_date=day,
             page_size=page_size,
@@ -213,8 +217,20 @@ class NaverSettlementsMixin:
                 Fee(
                     channel=Channel.NAVER,
                     external_product_id=_first_text(raw, ("productId",)),
+                    # fee_ref = the SAME HMAC line digest the order read issues as
+                    # OrderLine.line_ref (orderNo == orderId, productOrderId), so DOR
+                    # joins a commission to its order line without seeing any id.
+                    # Without productOrderId the old per-order digest is kept.
                     fee_ref=(
                         _digest(
+                            self.client.credentials.client_secret,
+                            "line",
+                            self.client.credentials.client_id,
+                            raw.get("orderNo"),
+                            raw.get("productOrderId"),
+                        )
+                        if raw.get("orderNo") is not None and raw.get("productOrderId") is not None
+                        else _digest(
                             self.client.credentials.client_secret,
                             "fee",
                             self.client.credentials.client_id,
@@ -224,7 +240,14 @@ class NaverSettlementsMixin:
                         if order_id is not None
                         else None
                     ),
-                    fee_type="commission",
+                    # 제공자 commissionType(PAY_COMMISSION·PLATFORM_COMMISSION 등)을 남긴다 —
+                    # 한 주문 라인에 수수료가 여러 줄로 오므로 종류가 없으면 같은 금액이 합쳐진다.
+                    fee_type=(
+                        f"commission:{raw.get('commissionType')}"
+                        if isinstance(raw.get("commissionType"), str)
+                        and re.fullmatch(r"[A-Z_]{1,60}", raw.get("commissionType"))
+                        else "commission"
+                    ),
                     basis=FeeBasis.ORDER_LINE,
                     period_start=day,
                     period_end=day,

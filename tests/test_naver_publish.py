@@ -10,13 +10,14 @@ from typing import Any
 import pytest
 from mcp import Client
 
-from k12_commerce_mcp.clients.naver import NaverClient
+from k12_commerce_mcp.clients.naver import NaverClient, NaverProviderError
 from k12_commerce_mcp.permissions import (
     WRITE_TOOL_NAMES,
     PermissionLevel,
     default_tool_policies,
     validate_tool_policies,
 )
+from k12_commerce_mcp.publishing.deferred_registration import provider_id_digest
 from k12_commerce_mcp.publishing.dor_approval import DorApprovalEvidenceVerifier
 from k12_commerce_mcp.publishing.naver import (
     NaverApprovalEvidence,
@@ -28,9 +29,17 @@ from k12_commerce_mcp.server import build_server
 
 
 class FakeNaverWriteClient:
-    def __init__(self, *, stock_readback: int = 3) -> None:
+    def __init__(
+        self,
+        *,
+        stock_readback: int = 3,
+        readback: dict[str, Any] | None = None,
+        readback_error: Exception | None = None,
+    ) -> None:
         self.calls: list[tuple[str, Any]] = []
         self.stock_readback = stock_readback
+        self.readback = readback
+        self.readback_error = readback_error
 
     async def upload_product_images(
         self, images: tuple[tuple[str, str, bytes], ...]
@@ -44,6 +53,10 @@ class FakeNaverWriteClient:
 
     async def get_origin_product(self, *, origin_product_no: int) -> dict[str, Any]:
         self.calls.append(("readback", origin_product_no))
+        if self.readback_error is not None:
+            raise self.readback_error
+        if self.readback is not None:
+            return self.readback
         return {
             "originProduct": {
                 "statusType": "SALE",
@@ -147,6 +160,7 @@ def test_permissions_allow_exactly_the_registered_publish_tools() -> None:
         "commerce_publish_naver_product",
         "commerce_publish_coupang_product",
         "commerce_publish_toss_product",
+        "commerce_publish_elevenst_product",
     )
 
 
@@ -174,6 +188,7 @@ async def test_inspector_schema_exposes_only_registered_write_tools() -> None:
         "commerce_publish_naver_product",
         "commerce_publish_coupang_product",
         "commerce_publish_toss_product",
+        "commerce_publish_elevenst_product",
     ]
     assert write_tools[0].annotations.destructive_hint is False
     assert write_tools[0].annotations.idempotent_hint is False
@@ -257,7 +272,8 @@ async def test_publish_uses_top_level_channel_payload_and_comprehensive_readback
 
 
 @pytest.mark.asyncio
-async def test_readback_stock_mismatch_never_returns_verified_receipt(tmp_path: Path) -> None:
+async def test_readback_noncore_field_mismatch_still_publishes(tmp_path: Path) -> None:
+    # 네이버가 부가 칸(stockQuantity)을 고쳐 저장해도 핵심 칸이 같으면 올라간 것이다.
     asset = tmp_path / "main.png"
     asset.write_bytes(b"verified-image")
     client = FakeNaverWriteClient(stock_readback=999)
@@ -265,9 +281,67 @@ async def test_readback_stock_mismatch_never_returns_verified_receipt(tmp_path: 
     result = await NaverProductPublisher(
         client=client, asset_root=tmp_path, approval_verifier=FakeApprovalVerifier()
     ).publish(value, evidence, idempotency_key=evidence.artifact_digest)
+    assert result.status is NaverPublishStatus.PUBLISHED
+    assert result.receipt_verified is True
+    assert result.origin_product_digest == provider_id_digest(
+        evidence.artifact_digest, 101
+    )
+    assert result.channel_product_digest == provider_id_digest(
+        evidence.artifact_digest, 202
+    )
+
+
+async def test_readback_core_field_mismatch_reports_pending_with_digests(
+    tmp_path: Path,
+) -> None:
+    asset = tmp_path / "main.png"
+    asset.write_bytes(b"verified-image")
+    client = FakeNaverWriteClient(
+        readback={
+            "originProduct": {
+                "statusType": "SALE",
+                "leafCategoryId": "50000000",
+                "name": "다른 상품명",
+                "salePrice": 1000,
+            },
+            "smartstoreChannelProduct": {
+                "channelProductNo": 202,
+                "channelProductDisplayStatusType": "ON",
+            },
+        }
+    )
+    value, evidence = approved_pair(asset)
+    result = await NaverProductPublisher(
+        client=client, asset_root=tmp_path, approval_verifier=FakeApprovalVerifier()
+    ).publish(value, evidence, idempotency_key=evidence.artifact_digest)
     assert result.status is NaverPublishStatus.PENDING_VERIFICATION
     assert result.receipt_verified is False
-    assert result.origin_product_digest is None
+    assert result.origin_product_digest == provider_id_digest(
+        evidence.artifact_digest, 101
+    )
+    assert result.channel_product_digest == provider_id_digest(
+        evidence.artifact_digest, 202
+    )
+    assert result.reason == "provider readback did not match the approved draft"
+
+
+async def test_readback_failure_reports_pending_with_digests(tmp_path: Path) -> None:
+    asset = tmp_path / "main.png"
+    asset.write_bytes(b"verified-image")
+    client = FakeNaverWriteClient(readback_error=NaverProviderError("naver HTTP 500"))
+    value, evidence = approved_pair(asset)
+    result = await NaverProductPublisher(
+        client=client, asset_root=tmp_path, approval_verifier=FakeApprovalVerifier()
+    ).publish(value, evidence, idempotency_key=evidence.artifact_digest)
+    assert result.status is NaverPublishStatus.PENDING_VERIFICATION
+    assert result.receipt_verified is False
+    assert result.origin_product_digest == provider_id_digest(
+        evidence.artifact_digest, 101
+    )
+    assert result.channel_product_digest == provider_id_digest(
+        evidence.artifact_digest, 202
+    )
+    assert result.reason == "provider readback failed"
 
 
 @pytest.mark.asyncio

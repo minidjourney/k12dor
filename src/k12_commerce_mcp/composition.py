@@ -15,11 +15,13 @@ from pathlib import Path
 from typing import Any
 
 from .clients.coupang import CoupangClient
+from .clients.elevenst_seller import ElevenstSellerClient
 from .clients.naver import NaverClient
 from .clients.toss import TossShoppingClient
 from .credentials import MarketplaceCredentials
 from .publishing import (
     CoupangProductPublisher,
+    ElevenstProductPublisher,
     NaverProductPublisher,
     TossProductPublisher,
 )
@@ -44,6 +46,7 @@ class LivePublishers:
     coupang: CoupangProductPublisher | None = None
     naver: NaverProductPublisher | None = None
     toss: TossProductPublisher | None = None
+    elevenst: ElevenstProductPublisher | None = None
 
 
 class CoupangPublishClient:
@@ -70,9 +73,11 @@ class CoupangPublishClient:
 class TossPublishClient:
     """Bind the publisher's write/readback protocol to TossShoppingClient.
 
-    ``TossShoppingClient.get_product`` returns the inner ``success`` object;
-    the publisher protocol expects the documented ``resultType``/``success``
-    envelope, so the readback is re-wrapped here without widening behavior.
+    The documented readback is the v2 address — ``get_product_v2`` returns
+    the inner ``success`` object there (the bare v1 GET answers 404 for
+    products registered through POST /products/v2); the publisher protocol
+    expects the documented ``resultType``/``success`` envelope, so the
+    readback is re-wrapped here without widening behavior.
     """
 
     def __init__(self, client: TossShoppingClient) -> None:
@@ -82,7 +87,7 @@ class TossPublishClient:
         return await self._client.register_product(payload)
 
     async def get_product(self, *, product_id: int) -> dict[str, Any]:
-        success = await self._client.get_product(product_id)
+        success = await self._client.get_product_v2(product_id)
         return {"resultType": "SUCCESS", "success": success}
 
 
@@ -159,6 +164,7 @@ def build_live_publishers(
     coupang: CoupangProductPublisher | None = None
     naver: NaverProductPublisher | None = None
     toss: TossProductPublisher | None = None
+    elevenst: ElevenstProductPublisher | None = None
     if dor_database is not None:
         if credentials.coupang is not None:
             coupang = CoupangProductPublisher(
@@ -183,4 +189,14 @@ def build_live_publishers(
                     dor_database, channel="toss"
                 ),
             )
-    return LivePublishers(coupang=coupang, naver=naver, toss=toss)
+        if credentials.elevenst is not None:
+            # 11st: the seller client already speaks the publisher protocol
+            # (register_product_xml / get_product); DOR's channel name is
+            # "11st" in approval_records and the channel intent table.
+            elevenst = ElevenstProductPublisher(
+                client=ElevenstSellerClient(credentials.elevenst),
+                approval_verifier=DorChannelApprovalVerifier(
+                    dor_database, channel="11st"
+                ),
+            )
+    return LivePublishers(coupang=coupang, naver=naver, toss=toss, elevenst=elevenst)

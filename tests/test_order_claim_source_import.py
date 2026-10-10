@@ -1103,13 +1103,14 @@ async def test_order_claim_read_sweep_sends_only_read_requests() -> None:
 
 
 def test_no_order_or_claim_mutation_tool_or_method_exists() -> None:
-    # The only approved WRITE tools are the three gated product publishers;
+    # The only approved WRITE tools are the four gated product publishers;
     # no order approval, cancel acceptance, return processing, or refund
     # tool exists anywhere on the approved manifest.
     assert WRITE_TOOL_NAMES == (
         "commerce_publish_naver_product",
         "commerce_publish_coupang_product",
         "commerce_publish_toss_product",
+        "commerce_publish_elevenst_product",
     )
     mutation_verbs = (
         "cancel",

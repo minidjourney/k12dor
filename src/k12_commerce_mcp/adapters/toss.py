@@ -46,6 +46,7 @@ from ..models import (
     TossRegistrationTemplateCandidate,
 )
 from ..models.claims import ClaimKind
+from ..models.products import TossProductNotice, TossProductNoticeItem
 from ..security import is_agent_safe_value
 from .base import (
     AdapterInvalidCursorError,
@@ -59,10 +60,10 @@ from .registration import (
     MAX_NOTICES,
     MAX_RESOURCES,
     _bounded,
-    group_descriptors,
     notice_category,
     notice_item,
     registration_resource,
+    toss_option_descriptor,
 )
 
 KST = ZoneInfo("Asia/Seoul")
@@ -212,9 +213,61 @@ _REGISTRATION_EXCHANGE_RETURN_FIELDS = {
     "applicationMethodDescription": "application_method_description",
     "applicationTermDescription": "application_term_description",
 }
+_HHMM = re.compile(r"(?:[01]\d|2[0-3]):[0-5]\d")
+# 출고 마감 시각 표기: H:mm·HH:mm, 예전 상품의 「N시」·「N시 M분」·「N시M분」(OPUS-4 F2).
+_CUTOFF_CLOCK = re.compile(r"(?P<hour>[0-9]{1,2}):(?P<minute>[0-9]{2})")
+_CUTOFF_KOREAN = re.compile(r"(?P<hour>[0-9]{1,2})\s*시(?:\s*(?P<minute>[0-9]{1,2})\s*분)?")
 
 
-def _registration_template(row: dict[str, Any]) -> TossRegistrationTemplate | None:
+def normalize_delivery_cutoff(value: object) -> str | None:
+    """출고 마감 시각을 HH:mm 으로 바꾼다. 받는 모양: H:mm, HH:mm, N시, N시 M분, N시M분.
+
+    시 0~23·분 0~59 밖이거나 다른 모양(빈 글 포함)이면 None — 추측해서 채우지 않는다.
+    """
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    match = _CUTOFF_CLOCK.fullmatch(stripped) or _CUTOFF_KOREAN.fullmatch(stripped)
+    if match is None:
+        return None
+    hour = int(match["hour"])
+    minute = int(match["minute"] or 0)
+    if hour > 23 or minute > 59:
+        return None
+    return f"{hour:02d}:{minute:02d}"
+
+
+def with_delivery_cutoff(row: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+    """deliveryDeadline 을 HH:mm 으로 읽고, 비어 있으면 같은 뜻의 deliveryCutoffTime 으로 채운다.
+
+    토스 문서(상품 조회 ProductResponseDeliveryPolicyFepResponse)는 두 칸 모두 「출고 마감 시각
+    (HH:mm)」이고, 등록 요청에는 deliveryDeadline 만 있다(OPUS-4, CEO 2026-10-07 「배송 마감시간을
+    내가 일일히 입력」). 예전에 올린 상품은 「15시」처럼 적혀 있어 normalize_delivery_cutoff 로
+    HH:mm 으로 바꿔 받는다(F2). 읽을 수 없는 deliveryDeadline 은 다른 칸으로 덮지 않고 그대로 두어
+    후보(missing_fields)에서 비운다. 원본 row 는 바꾸지 않고 얕은 사본을 돌려준다. 두 번째 값은
+    마감 시각을 어느 칸에서 읽었는지(없으면 None).
+    """
+    delivery = row.get("deliveryPolicy")
+    if not isinstance(delivery, dict):
+        return row, None
+    deadline = delivery.get("deliveryDeadline")
+    normalized = normalize_delivery_cutoff(deadline)
+    if normalized is not None:
+        if normalized == deadline:
+            return row, "deliveryDeadline"
+        patched = {**row, "deliveryPolicy": {**delivery, "deliveryDeadline": normalized}}
+        return patched, "deliveryDeadline"
+    deadline_absent = deadline is None or (isinstance(deadline, str) and not deadline.strip())
+    cutoff = normalize_delivery_cutoff(delivery.get("deliveryCutoffTime"))
+    if deadline_absent and cutoff is not None:
+        patched = {**row, "deliveryPolicy": {**delivery, "deliveryDeadline": cutoff}}
+        return patched, "deliveryCutoffTime"
+    return row, None
+
+
+def _registration_template(
+    row: dict[str, Any], *, safe: Callable[[Any], bool] = is_agent_safe_value
+) -> TossRegistrationTemplate | None:
     delivery = row.get("deliveryPolicy")
     exchange_return = row.get("exchangeReturnPolicy")
     if not isinstance(delivery, dict) or not isinstance(exchange_return, dict):
@@ -231,7 +284,7 @@ def _registration_template(row: dict[str, Any]) -> TossRegistrationTemplate | No
             if source in exchange_return
         },
     }
-    if not is_agent_safe_value(projected):
+    if not safe(projected):
         return None
     try:
         return TossRegistrationTemplate.model_validate(projected)
@@ -239,7 +292,7 @@ def _registration_template(row: dict[str, Any]) -> TossRegistrationTemplate | No
         return None
 
 def _registration_template_candidate(
-    row: dict[str, Any],
+    row: dict[str, Any], *, safe: Callable[[Any], bool] = is_agent_safe_value
 ) -> TossRegistrationTemplateCandidate | None:
     delivery = row.get("deliveryPolicy")
     exchange_return = row.get("exchangeReturnPolicy")
@@ -259,13 +312,12 @@ def _registration_template_candidate(
     }
     # Scan even the fields we will omit: a bad provider value must never be
     # smuggled into Agent-visible data or silently treated as a safe blank.
-    if not is_agent_safe_value(projected):
+    if not safe(projected):
         return None
     missing: list[str] = []
     deadline = projected["delivery_policy"].get("delivery_deadline")
     if deadline is not None and (
-        not isinstance(deadline, str)
-        or re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", deadline) is None
+        not isinstance(deadline, str) or _HHMM.fullmatch(deadline) is None
     ):
         projected["delivery_policy"]["delivery_deadline"] = None
         missing.append("delivery_policy.delivery_deadline")
@@ -278,6 +330,65 @@ def _registration_template_candidate(
     try:
         return TossRegistrationTemplateCandidate.model_validate(
             {**projected, "missing_fields": missing}
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+_NOTICE_CODE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_NOTICE_CTRL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _registered_notice(
+    row: dict[str, Any], *, safe: Callable[[Any], bool] = is_agent_safe_value
+) -> TossProductNotice | None:
+    """상품 조회(products/{id}/v2) 응답의 notice(categoryCode + items[id,title,content]).
+
+    OPUS-4 워커 C: 기존 토스 상품의 고시를 새 등록의 근거로 쓴다(원칙 2 ①). Agent 안전 검사를
+    통과하지 못한 항목 내용(예: 전화번호가 든 A/S 항목)은 복사하지 않고 번호만 withheld 로 알린다.
+    """
+    notice = row.get("notice")
+    if not isinstance(notice, dict):
+        return None
+    code = notice.get("categoryCode")
+    raw_items = notice.get("items")
+    if (
+        not isinstance(code, str)
+        or not _NOTICE_CODE.fullmatch(code)
+        or not isinstance(raw_items, list)
+    ):
+        return None
+    items: list[TossProductNoticeItem] = []
+    withheld: list[int] = []
+    seen: set[int] = set()
+    for entry in raw_items[:100]:
+        if not isinstance(entry, dict):
+            continue
+        item_id = _strict_int(entry.get("id"))
+        if item_id is None or item_id < 0 or item_id in seen:
+            continue
+        seen.add(item_id)
+        content = entry.get("content")
+        title = entry.get("title")
+        title_text = (
+            title.strip()
+            if isinstance(title, str) and title.strip() and len(title.strip()) <= 500
+            and not _NOTICE_CTRL.search(title) and safe(title.strip())
+            else None
+        )
+        if (
+            not isinstance(content, str)
+            or not content.strip()
+            or len(content.strip()) > 4000
+            or _NOTICE_CTRL.search(content)
+            or not safe(content.strip())
+        ):
+            withheld.append(item_id)
+            continue
+        items.append(TossProductNoticeItem(id=item_id, title=title_text, content=content.strip()))
+    try:
+        return TossProductNotice(
+            category_code=code, items=tuple(items), withheld_item_ids=tuple(withheld)
         )
     except (TypeError, ValueError):
         return None
@@ -771,7 +882,9 @@ class TossShoppingAdapter:
         missing = ["master_sku"]
         if not option_ids:
             missing.append("external_option_ids")
-        registration_template = _registration_template(row)
+        # 출고 마감 시각: deliveryDeadline 이 없으면 같은 뜻의 deliveryCutoffTime(토스 문서)으로.
+        policy_row, _deadline_source = with_delivery_cutoff(row)
+        registration_template = _registration_template(policy_row)
         return ProductDetail(
             channel=Channel.TOSS_STORE,
             external_product_id=str(product_id),
@@ -785,8 +898,12 @@ class TossShoppingAdapter:
             attributes=(),
             registration_template=registration_template,
             registration_template_candidate=(
-                _registration_template_candidate(row) if registration_template is None else None
+                _registration_template_candidate(policy_row)
+                if registration_template is None
+                else None
             ),
+            notice=_registered_notice(row),
+            is_tax_free=row.get("isTaxFree") if type(row.get("isTaxFree")) is bool else None,
             completeness=Completeness(
                 status=ResultStatus.INCOMPLETE,
                 missing_fields=tuple(missing),
@@ -1106,8 +1223,11 @@ class TossShoppingAdapter:
             "provider_constraint_templates",
         )
         templates = await self.client.get_category_constraint_templates(parsed)
-        option_lists: list[Any] = []
-        for key in ("categorySalesOptions", "categorySearchOptions"):
+        descriptors: list[Any] = []
+        for key, option_group in (
+            ("categorySalesOptions", "sales_option"),
+            ("categorySearchOptions", "search_option"),
+        ):
             rows = templates.get(key)
             if rows is None:
                 continue
@@ -1115,7 +1235,10 @@ class TossShoppingAdapter:
                 raise AdapterInvalidResponseError(
                     "toss shopping constraint templates shape is invalid"
                 )
-            option_lists.extend(rows)
+            descriptors.extend(
+                toss_option_descriptor(row, option_group=option_group)
+                for row in _bounded(rows, MAX_NOTICES, "toss option templates")
+            )
         if not any(
             key in templates
             for key in ("categorySalesOptions", "categorySearchOptions")
@@ -1139,7 +1262,7 @@ class TossShoppingAdapter:
         return MarketplaceCategoryRequirements(
             channel=Channel.TOSS_STORE,
             category_id=str(parsed),
-            descriptors=group_descriptors(option_lists),
+            descriptors=tuple(descriptors),
             notice_categories=tuple(notice_category(row) for row in code_rows),
             notices=notices,
             source=source,

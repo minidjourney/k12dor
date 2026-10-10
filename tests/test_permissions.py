@@ -57,6 +57,7 @@ EXPECTED_READ_TOOLS = (
     "commerce_get_naver_subcategories",
     "commerce_get_naver_channel_product",
     "commerce_get_naver_origin_product",
+    "commerce_get_naver_registration_defaults",
     "commerce_get_naver_daily_settlements",
     "commerce_get_naver_address_books",
     "commerce_get_naver_settle_cases",
@@ -153,6 +154,14 @@ EXPECTED_READ_TOOLS = (
     "commerce_get_toss_price_compare_products",
     "commerce_get_marketplace_category_requirements",
     "commerce_get_marketplace_registration_resources",
+    "commerce_get_elevenst_registration_options",
+    "commerce_get_elevenst_product",
+    "commerce_get_elevenst_categories",
+    "commerce_get_elevenst_registered_defaults",
+    "commerce_get_toss_notice_categories",
+    "commerce_get_toss_notice_items",
+    "commerce_get_toss_registration_locations",
+    "commerce_get_mall_listing_status",
 )
 
 
@@ -160,6 +169,8 @@ EXPECTED_WRITE_TOOLS = (
     "commerce_publish_naver_product",
     "commerce_publish_coupang_product",
     "commerce_publish_toss_product",
+    # CEO 2026-10-07 msg 2780: 11st registration (approval-gated like Toss).
+    "commerce_publish_elevenst_product",
 )
 
 

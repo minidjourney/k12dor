@@ -546,12 +546,59 @@ async def test_toss_requirements_map_templates_notices_and_codes() -> None:
     color = requirements.descriptors[0]
     assert color.required is True
     assert color.allowed_value_names == ("검정", "흰색")
+    # CTO 2026-10-08: 구매옵션·검색옵션을 구분해 알려 준다
+    # (토스는 구매옵션을 stocks.options 로 꼭 받는다).
+    assert color.option_group == "sales_option"
+    assert requirements.descriptors[1].option_group == "search_option"
+    assert requirements.descriptors[1].required is False
     assert requirements.notice_categories[0].category_code == "FURNITURE"
     assert requirements.notice_categories[0].title == "가구"
     assert requirements.notices[0].notice_id == "27"
     assert requirements.notices[0].title == "소재/재질"
     assert requirements.notices[0].required is True
     assert "나무, 가죽" not in requirements.model_dump_json()
+
+
+async def test_toss_requirements_read_documented_template_shape() -> None:
+    """CTO 2026-10-08: 문서 모양(key·isOption·valueCandidates·unitValues).
+
+    실측 분류 15799 와 같은 모양이다.
+    """
+
+    class FakeClient:
+        credentials = TossShoppingCredentials("synthetic-access", "synthetic-secret")
+
+        async def get_category_constraint_templates(
+            self, category_id: int
+        ) -> dict[str, Any]:
+            return {
+                "categorySalesOptions": [
+                    {"id": 1, "key": "색상", "valueCandidates": [], "isOption": False,
+                     "unitValues": None},
+                    {"id": 2, "key": "수량", "valueCandidates": [], "isOption": False,
+                     "unitValues": ["개", "팩", "입", "병"]},
+                ],
+                "categorySearchOptions": [
+                    {"key": "색상계열", "valueCandidates": ["블랙계열", "네이비계열"],
+                     "isOption": True},
+                ],
+            }
+
+        async def list_notice_category_codes(self) -> tuple[dict[str, Any], ...]:
+            return ({"categoryCode": "ETC_GOODS", "name": "기타 재화"},)
+
+    adapter = TossShoppingAdapter(FakeClient(), clock=FIXED_CLOCK)
+    requirements = await adapter.get_marketplace_category_requirements(category_id="15799")
+
+    rows = [
+        (d.key, d.option_group, d.required, d.unit_names, d.allowed_value_names)
+        for d in requirements.descriptors
+    ]
+    assert rows == [
+        ("색상", "sales_option", True, (), ()),
+        ("수량", "sales_option", True, ("개", "팩", "입", "병"), ()),
+        ("색상계열", "search_option", False, (), ("블랙계열", "네이비계열")),
+    ]
 
 
 async def test_toss_requirements_fail_closed_on_malformed_templates() -> None:

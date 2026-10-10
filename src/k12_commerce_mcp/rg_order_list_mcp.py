@@ -14,7 +14,7 @@ from .security import assert_agent_safe_value
 _ID = re.compile(r"[1-9][0-9]{0,19}\Z")
 _MONEY = re.compile(r"[0-9]{1,15}(?:\.[0-9]{1,2})?\Z")
 _CURRENCY = re.compile(r"[A-Z]{3}\Z")
-_TOKEN = re.compile(r"[A-Za-z0-9_-]{1,100}\Z")
+_TOKEN = re.compile(r"[A-Za-z0-9_.+\-/=]{1,200}\Z")
 
 
 class RgOrderListLine(CanonicalModel):
@@ -110,7 +110,7 @@ async def read_rg_order_list(
     if (
         type(payload.get("code")) is not int
         or not isinstance(rows, list)
-        or len(rows) > 100
+        or len(rows) > 1000
         or (token is not None
         and (not isinstance(token, str) or (token and _TOKEN.fullmatch(token) is None)))
     ):

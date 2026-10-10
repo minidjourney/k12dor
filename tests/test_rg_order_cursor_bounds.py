@@ -1,9 +1,10 @@
 """Rocket Growth order pages honor page_size with a bounded signed cursor.
 
-The provider walks the full D-28..D+1 envelope to compute the day's summary,
-but each get_orders call must return at most page_size orders. Callers page
-through the whole day with a cursor bound to date, page size, and a digest of
-the observed day's order set; drift or tampering fails closed.
+A cursor-less call walks the full D-28..D+1 envelope, freezes the normalized
+canonical orders plus the day's summary in the adapter instance, and issues
+a cursor bound to date, page size, collection mode, and an opaque snapshot
+id. Continuations replay the frozen snapshot with zero provider calls;
+tampering or stale cursors fail closed.
 """
 
 from __future__ import annotations
@@ -99,9 +100,9 @@ async def test_rg_page_size_one_traverses_all_42_orders() -> None:
 
     assert len(seen_refs) == 42
     assert cursor is None
-    # Each call re-walks the 3 provider pages once to reproduce the
-    # full-day snapshot; no per-item extra calls.
-    assert client.calls == 42 * 3
+    # Only the cursor-less first call walks the 3 provider pages; every
+    # continuation replays the frozen snapshot with zero provider GETs.
+    assert client.calls == 3
 
 
 async def test_rg_cursor_contains_no_raw_order_ids() -> None:
@@ -118,6 +119,8 @@ async def test_rg_cursor_contains_no_raw_order_ids() -> None:
         "kind",
         "date",
         "page_size",
+        "mode",
+        "snapshot",
         "offset",
         "fingerprint",
         "sig",
@@ -176,29 +179,36 @@ async def test_rg_cursor_is_bound_to_date_and_page_size() -> None:
         )
 
 
-async def test_rg_snapshot_drift_fails_closed() -> None:
+async def test_rg_snapshot_is_frozen_for_continuation() -> None:
     rows = [rg_row(f"order-{index}") for index in range(3)]
     client = FakeRgClient([rows])
     adapter = CoupangRocketGrowthAdapter(client)
     page = await adapter.get_orders(page_size=1, business_date=BUSINESS_DATE)
     cursor = page.next_cursor
 
+    # Provider drift after the first page must not reach the continuation:
+    # the cursor replays the frozen snapshot with no provider call.
     client.pages = [[*rows, rg_row("order-late")]]
 
-    with pytest.raises(AdapterInvalidCursorError, match="snapshot changed"):
-        await adapter.get_orders(
-            page_size=1, cursor=cursor, business_date=BUSINESS_DATE
-        )
+    second = await adapter.get_orders(
+        page_size=1, cursor=cursor, business_date=BUSINESS_DATE
+    )
+    assert len(second.items) == 1
+    assert second.items[0].order_ref != page.items[0].order_ref
+    assert second.summary.order_count == 3
 
     client.pages = [rows[:-1]]
 
-    with pytest.raises(AdapterInvalidCursorError, match="snapshot changed"):
-        await adapter.get_orders(
-            page_size=1, cursor=cursor, business_date=BUSINESS_DATE
-        )
+    third = await adapter.get_orders(
+        page_size=1, cursor=second.next_cursor, business_date=BUSINESS_DATE
+    )
+    assert len(third.items) == 1
+    assert third.next_cursor is None
+    assert third.summary.order_count == 3
+    assert client.calls == 1
 
 
-async def test_rg_same_order_amount_drift_fails_closed() -> None:
+async def test_rg_same_order_amount_is_frozen_for_continuation() -> None:
     rows = [rg_row(f"order-{index}") for index in range(3)]
     client = FakeRgClient([rows])
     adapter = CoupangRocketGrowthAdapter(client)
@@ -207,8 +217,16 @@ async def test_rg_same_order_amount_drift_fails_closed() -> None:
     changed[1]["orderItems"][0]["salesQuantity"] = 2
     client.pages = [changed]
 
-    with pytest.raises(AdapterInvalidCursorError, match="snapshot changed"):
-        await adapter.get_orders(page_size=1, cursor=page.next_cursor, business_date=BUSINESS_DATE)
+    second = await adapter.get_orders(
+        page_size=1, cursor=page.next_cursor, business_date=BUSINESS_DATE
+    )
+
+    # The frozen snapshot keeps the originally observed quantity and totals.
+    assert len(second.items) == 1
+    assert second.items[0].lines[0].quantity == 1
+    assert second.summary.order_count == 3
+    assert second.summary.sales_quantity == 3
+    assert client.calls == 1
 
 
 async def test_rg_empty_day_returns_no_cursor() -> None:

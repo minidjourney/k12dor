@@ -91,9 +91,11 @@ async def test_naver_extracts_only_inert_image_references_from_active_html():
     item = await naver(naver_row(html)).get_product_content("123")
     refs = [r for r in item.image_refs if r.role == "detail"]
     assert len(refs) == 1
-    assert item.images == tuple(
-        i for i in item.images if i.role != "detail"
-    )  # Legacy safety is unchanged.
+    # Subtree-blocked markup never emits its images; the img outside the
+    # blocked subtrees passed the url policy and is kept.
+    assert [i.url for i in item.images if i.role == "detail"] == [BODY]
+    assert "hidden" not in item.model_dump_json()
+    assert "frame" not in item.model_dump_json()
     assert_agent_safe_value(item)
 
 

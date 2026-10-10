@@ -18,6 +18,7 @@ from ..adapters.base import (
     AdapterRateLimitError,
     AdapterTimeoutError,
 )
+from ..security import safe_provider_message
 
 TOKEN_URL = "https://oauth2.cert.toss.im/token"
 API_BASE_URL = "https://shopping-fep.toss.im/api/v3/shopping-fep"
@@ -106,6 +107,51 @@ class TossShoppingRequestError(ValueError):
     """Local request validation failure."""
 
 
+# CTO 2026-10-08 (16:18 토스 「registration was rejected」): 거절 이유가 사라져 DOR 화면에
+# 「ValueError: Toss product registration was rejected」만 남았다. 토스 응답의 오류 코드 「모양」과
+# 이유 문구 중 「괄호 안 칸 이름」(예: 「… (productId)」)만 남긴다 — 이유 원문·값은 남기지 않는다.
+_SAFE_TOSS_ERROR_CODE = re.compile(r"^[A-Za-z0-9_.-]{1,60}$")
+_SAFE_TOSS_FIELD = re.compile(r"^[A-Za-z][A-Za-z0-9_.\[\]]{0,80}$")
+_TOSS_REASON_FIELDS = re.compile(r"\(([A-Za-z][A-Za-z0-9_.\[\], ]{0,200})\)")
+
+
+def safe_toss_error_summary(body: Any) -> str:
+    """「; code=X; fields=a,b」 — 오류 코드와 이유 문구 괄호 안의 칸 이름만. 원문·값 없음."""
+    if not isinstance(body, dict):
+        return ""
+    error = body.get("error")
+    if not isinstance(error, dict):
+        return ""
+    parts: list[str] = []
+    code = error.get("errorCode")
+    if isinstance(code, str) and _SAFE_TOSS_ERROR_CODE.fullmatch(code):
+        parts.append(f"code={code}")
+    reason = error.get("reason")
+    names: list[str] = []
+    if isinstance(reason, str) and len(reason) <= 2000:
+        for group in _TOSS_REASON_FIELDS.findall(reason)[:6]:
+            for name in (piece.strip() for piece in group.split(",")):
+                if name and _SAFE_TOSS_FIELD.fullmatch(name) and name not in names:
+                    names.append(name)
+    if names:
+        parts.append("fields=" + ",".join(names[:8]))
+    # CTO 2026-10-08 (19:17 「COMMON_ERROR」만 남아 원인을 몰랐다):
+    # 토스가 적어 준 거절 이유(reason)도 안전 검사를 거친 한 줄로 남긴다.
+    said = safe_provider_message(reason) if isinstance(reason, str) and len(reason) <= 2000 else ""
+    if said:
+        parts.append("msg=" + said[:200].strip())
+    return ("; " + "; ".join(parts)) if parts else ""
+
+
+def _safe_toss_error_response(response: httpx.Response, raw: bytes) -> str:
+    del response
+    if len(raw) > 64 * 1024:
+        return ""
+    try:
+        return safe_toss_error_summary(json.loads(raw))
+    except ValueError:
+        return ""
+
 @dataclass(frozen=True, repr=False)
 class TossShoppingCredentials:
     access_key: str
@@ -119,6 +165,14 @@ class TossShoppingCredentials:
 class TossShoppingPage:
     rows: tuple[dict[str, Any], ...]
     next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class TossLocationRows:
+    """One v2 location list read; ``has_more`` mirrors the provider's hasNext."""
+
+    rows: tuple[dict[str, Any], ...]
+    has_more: bool
 
 
 def _is_valid_cursor(value: object) -> bool:
@@ -203,8 +257,17 @@ class TossShoppingClient:
                 if response.status_code == 429:
                     raise AdapterRateLimitError
                 if response.status_code < 200 or response.status_code >= 300:
+                    raw = b""
+                    try:
+                        async for chunk in response.aiter_bytes():
+                            raw += chunk
+                            if len(raw) > 64 * 1024:
+                                break
+                    except httpx.HTTPError:
+                        raw = b""
                     raise TossShoppingProviderError(
                         f"toss shopping request failed with HTTP {response.status_code}"
+                        f"{_safe_toss_error_response(response, raw)}"
                     )
                 content_length = response.headers.get("content-length")
                 if content_length is not None:
@@ -471,7 +534,7 @@ class TossShoppingClient:
         result_type = result.get("resultType")
         success = result.get("success")
         product_id = success.get("id") if isinstance(success, dict) else None
-        return {
+        envelope: dict[str, Any] = {
             "resultType": result_type if isinstance(result_type, str) else None,
             "success": (
                 {"id": product_id if type(product_id) is int else None}
@@ -479,6 +542,10 @@ class TossShoppingClient:
                 else None
             ),
         }
+        if result_type == "FAIL":
+            # CTO 2026-10-08: 거절 이유의 안전한 요약(오류 코드·괄호 안 칸 이름)만 함께 돌려준다.
+            envelope["failure_summary"] = safe_toss_error_summary(result)
+        return envelope
 
     async def list_product_items(
         self,
@@ -705,6 +772,42 @@ class TossShoppingClient:
             access_token=await self._access_token(),
         )
         return self._success_rows(
+            payload,
+            keys=("locations", "exchangeRefundLocations", "items", "results", "data"),
+            context="exchange refund locations",
+        )
+
+    # OPUS-4 (워커 C): 같은 두 GET 을 한 번씩 읽되 hasNext 를 함께 돌려준다 — 다음 쪽
+    # 요청 파라미터 이름은 문서에 없어(응답 예시에 nextToken·hasNext 만 있음) 더 읽지 않고
+    # 「더 있음」만 정직하게 알린다. 주소 글자는 호출자가 투영 단계에서 버린다.
+    @staticmethod
+    def _location_rows(
+        payload: Any, *, keys: tuple[str, ...], context: str
+    ) -> TossLocationRows:
+        rows = TossShoppingClient._success_rows(payload, keys=keys, context=context)
+        success = payload.get("success") if isinstance(payload, dict) else None
+        has_more = isinstance(success, dict) and success.get("hasNext") is True
+        return TossLocationRows(rows=rows, has_more=has_more)
+
+    async def read_delivery_locations_v2(self) -> TossLocationRows:
+        payload = await self._request(
+            "GET",
+            DELIVERY_LOCATION_V2_URL,
+            access_token=await self._access_token(),
+        )
+        return self._location_rows(
+            payload,
+            keys=("locations", "deliveryLocations", "items", "results", "data"),
+            context="delivery locations",
+        )
+
+    async def read_exchange_refund_locations_v2(self) -> TossLocationRows:
+        payload = await self._request(
+            "GET",
+            EXCHANGE_REFUND_LOCATION_V2_URL,
+            access_token=await self._access_token(),
+        )
+        return self._location_rows(
             payload,
             keys=("locations", "exchangeRefundLocations", "items", "results", "data"),
             context="exchange refund locations",

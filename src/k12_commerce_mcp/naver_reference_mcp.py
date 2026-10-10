@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .clients.naver import NaverProviderError
 from .models.common import CanonicalModel
 from .security import assert_agent_safe_value, safe_display_value
 
@@ -190,7 +191,19 @@ class NaverReferenceRead:
             payload = await self.client._request(
                 "GET", path, query=params, access_token=await self.client._access_token()
             )
-        except Exception:
+        except Exception as exc:
+            if (
+                kind in {"attribute", "attribute_value"}
+                and isinstance(exc, NaverProviderError)
+                and "HTTP 404" in str(exc)
+                and "code=NOT_FOUND" in str(exc)
+            ):
+                return {
+                    **base,
+                    "status": "complete",
+                    "total_count": 0,
+                    "reasons": ["no_attributes_for_category"],
+                }
             return {**base, "status": "unavailable", "reasons": ["provider_unavailable"]}
         rows = payload.get(container) if container and isinstance(payload, dict) else payload
         if not isinstance(rows, list) or len(rows) > 100_000:

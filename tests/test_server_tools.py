@@ -245,6 +245,7 @@ async def test_capabilities_are_explicitly_read_only_and_deferred_by_channel() -
         "commerce_get_naver_subcategories",
         "commerce_get_naver_channel_product",
         "commerce_get_naver_origin_product",
+        "commerce_get_naver_registration_defaults",
         "commerce_get_naver_daily_settlements",
         "commerce_get_naver_address_books",
         "commerce_get_naver_settle_cases",
@@ -341,6 +342,14 @@ async def test_capabilities_are_explicitly_read_only_and_deferred_by_channel() -
         "commerce_get_toss_price_compare_products",
         "commerce_get_marketplace_category_requirements",
         "commerce_get_marketplace_registration_resources",
+        "commerce_get_elevenst_registration_options",
+        "commerce_get_elevenst_product",
+        "commerce_get_elevenst_categories",
+        "commerce_get_elevenst_registered_defaults",
+        "commerce_get_toss_notice_categories",
+        "commerce_get_toss_notice_items",
+        "commerce_get_toss_registration_locations",
+        "commerce_get_mall_listing_status",
     }
     assert {
         row["tool_name"]

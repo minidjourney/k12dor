@@ -16,6 +16,7 @@ from pydantic.experimental.missing_sentinel import MISSING
 
 from .models.common import CanonicalModel
 from .naver_category_single_mcp import CATEGORY_ID, CATEGORY_PREFIX, PresentFields
+from .naver_registration_defaults import RegistrationDefaultsRead, read_registration_defaults
 from .naver_settle_category_address_mcp import Category, _text
 from .security import assert_agent_safe_value
 
@@ -109,6 +110,15 @@ def _result(model: type, operation: str, status: str, reason: str | None = None,
 
 def _int(value: object, low: int, high: int) -> bool:
     return type(value) is int and low <= value <= high
+
+
+def _int_arg(value: object) -> int | None:
+    """Int path id; also accept the digit-string form list projections emit."""
+    if type(value) is int:
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
 
 
 def _datetime(value: object) -> bool:
@@ -216,10 +226,13 @@ def _project_product(payload: object, operation: str) -> ProductRead:
 
 async def read_product(client: Any | None, number: object, *, origin: bool) -> ProductRead:
     operation = ORIGIN_OP if origin else CHANNEL_OP
-    if not _int(number, 1, 2**63 - 1):
+    parsed = _int_arg(number)
+    if parsed is None or not 1 <= parsed <= 2**63 - 1:
         return _result(ProductRead, operation, "invalid_request", "invalid_request")
     kind = "origin-products" if origin else "channel-products"
-    payload, failure = await _fetch(client, ProductRead, operation, f"/v2/products/{kind}/{number}")
+    payload, failure = await _fetch(
+        client, ProductRead, operation, f"/v2/products/{kind}/{parsed}"
+    )
     return failure if failure is not None else _project_product(payload, operation)
 
 
@@ -239,6 +252,8 @@ def register_catalog_product_tools(server: Any, client: Any | None, annotations:
         """read-channel-product-1-product GET /v2/products/channel-products/:channelProductNo.
 
         Closed catalog projection only; no same-path mutations, contact or raw content.
+        channelProductNo: positive int64; the digit-string external_product_id
+        from commerce_get_products is also accepted.
         """
         return await read_product(client, channelProductNo, origin=False)
 
@@ -249,5 +264,25 @@ def register_catalog_product_tools(server: Any, client: Any | None, annotations:
         """read-origin-product-product GET /v2/products/origin-products/:originProductNo.
 
         Closed catalog projection only; no same-path mutations, contact or raw content.
+        originProductNo: positive int64; a digit string is also accepted.
         """
         return await read_product(client, originProductNo, origin=True)
+
+    @server.tool(annotations=annotations, structured_output=True)
+    async def commerce_get_naver_registration_defaults(
+        originProductNo: Annotated[Any, WithJsonSchema({"type": "integer"})] = None,
+        channelProductNo: Annotated[Any, WithJsonSchema({"type": "integer"})] = None,
+    ) -> RegistrationDefaultsRead:
+        """Registered Naver product's registration values for DOR defaults (read-only).
+
+        Exactly one of originProductNo / channelProductNo. A channel product number
+        (the id kept on orders and SKU links) is resolved to its origin product first.
+        Returns only origin area, minor purchase, notice type+items, A/S guide text,
+        the seller-registered A/S contact (as_telephone and the notice items
+        afterServiceDirector / customerServicePhoneNumber — company contact, CEO
+        2026-10-07), shipping/return address-book ids (numbers only) and delivery
+        fee policy. Never buyer data, other phone fields, or address text.
+        """
+        return await read_registration_defaults(
+            client, origin_product_no=originProductNo, channel_product_no=channelProductNo
+        )

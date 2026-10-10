@@ -10,7 +10,7 @@ provider envelopes — and every collection is strictly bounded.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import Field
 
@@ -44,6 +44,9 @@ class MarketplaceRequirementDescriptor(CanonicalModel):
     allowed_value_names: tuple[ShortText, ...] = Field(default=(), max_length=200)
     unit_names: tuple[ShortText, ...] = Field(default=(), max_length=50)
     image_allowed: bool = False
+    # CTO 2026-10-08: 토스는 구매옵션(categorySalesOptions → stocks.options.groupName, 전부 필수)과
+    # 검색옵션(categorySearchOptions → stocks.searchOption)을 다르게 받는다. 어느 쪽인지 알려 준다.
+    option_group: Literal["sales_option", "search_option"] | None = None
 
 
 class MarketplaceNoticeCategory(CanonicalModel):

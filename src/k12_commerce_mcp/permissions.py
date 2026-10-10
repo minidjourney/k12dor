@@ -62,6 +62,7 @@ READ_TOOL_NAMES = (
     "commerce_get_naver_subcategories",
     "commerce_get_naver_channel_product",
     "commerce_get_naver_origin_product",
+    "commerce_get_naver_registration_defaults",
     "commerce_get_naver_daily_settlements",
     "commerce_get_naver_address_books",
     "commerce_get_naver_settle_cases",
@@ -158,11 +159,21 @@ READ_TOOL_NAMES = (
     "commerce_get_toss_price_compare_products",
     "commerce_get_marketplace_category_requirements",
     "commerce_get_marketplace_registration_resources",
+    "commerce_get_elevenst_registration_options",
+    "commerce_get_elevenst_product",
+    "commerce_get_elevenst_categories",
+    # OPUS-4 워커 C (CEO 2026-10-07): 몰 등록 칸 자동 채움 근거 — 모두 GET 읽기.
+    "commerce_get_elevenst_registered_defaults",
+    "commerce_get_toss_notice_categories",
+    "commerce_get_toss_notice_items",
+    "commerce_get_toss_registration_locations",
+    "commerce_get_mall_listing_status",
 )
 WRITE_TOOL_NAMES = (
     "commerce_publish_naver_product",
     "commerce_publish_coupang_product",
     "commerce_publish_toss_product",
+    "commerce_publish_elevenst_product",
 )
 APPROVED_TOOL_NAMES = (*READ_TOOL_NAMES, *WRITE_TOOL_NAMES)
 LOCAL_PROVIDER_METHOD_TOOL_NAMES = frozenset(

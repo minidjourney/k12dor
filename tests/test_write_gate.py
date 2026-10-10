@@ -4,7 +4,11 @@ from typing import Any
 
 import pytest
 
-from k12_commerce_mcp.publishing import CoupangProductPublisher, TossProductPublisher
+from k12_commerce_mcp.publishing import (
+    CoupangProductPublisher,
+    ElevenstProductPublisher,
+    TossProductPublisher,
+)
 from k12_commerce_mcp.write_gate import (
     APPROVAL_RELEASED_WRITE_NAMES,
     APPROVAL_RELEASED_WRITES,
@@ -46,7 +50,7 @@ def test_registration_enabled_is_always_false_without_env_override(
         assert registration_enabled(DeferredWrite.COUPANG_SELLER_PRODUCT_UPDATE) is False
 
 
-def test_only_the_three_product_registration_writes_are_released(
+def test_only_the_released_product_registration_writes_are_released(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for name in (
@@ -60,11 +64,13 @@ def test_only_the_three_product_registration_writes_are_released(
         DeferredWrite.COUPANG_SELLER_PRODUCT_CREATE,
         DeferredWrite.NAVER_PRODUCT_CREATE,
         DeferredWrite.TOSS_PRODUCT_REGISTER,
+        DeferredWrite.ELEVENST_PRODUCT_REGISTER,
     )
     assert APPROVAL_RELEASED_WRITE_NAMES == (
         "coupang_seller_product_create",
         "naver_product_create",
         "toss_product_register",
+        "elevenst_product_register",
     )
     for write in APPROVAL_RELEASED_WRITES:
         assert registration_enabled(write) is True
@@ -89,6 +95,7 @@ def test_deferred_writes_are_names_only_for_each_channel() -> None:
     assert DEFERRED_WRITE_NAMES == (
         "coupang_seller_product_create",
         "coupang_seller_product_update",
+        "elevenst_product_register",
         "naver_product_create",
         "toss_product_register",
     )
@@ -98,6 +105,9 @@ def test_publishers_declare_only_deferred_writes() -> None:
     assert CoupangProductPublisher.intended_writes == (
         DeferredWrite.COUPANG_SELLER_PRODUCT_CREATE,
         DeferredWrite.COUPANG_SELLER_PRODUCT_UPDATE,
+    )
+    assert ElevenstProductPublisher.intended_writes == (
+        DeferredWrite.ELEVENST_PRODUCT_REGISTER,
     )
     assert TossProductPublisher.intended_writes == (DeferredWrite.TOSS_PRODUCT_REGISTER,)
 
@@ -124,8 +134,23 @@ async def test_toss_publisher_rejects_missing_evidence_before_any_client_call() 
     assert client.calls == []
 
 
+async def test_elevenst_publisher_rejects_missing_evidence_before_any_client_call() -> (
+    None
+):
+    client = RecordingClient()
+
+    with pytest.raises(ValueError, match="approval evidence"):
+        await ElevenstProductPublisher(client=client).publish(
+            {"name": "x"}, None, idempotency_key="a" * 64
+        )
+
+    assert client.calls == []
+
+
 async def test_publishers_fail_closed_when_executor_is_not_configured() -> None:
     with pytest.raises(ValueError):
         await CoupangProductPublisher().publish(None, None, idempotency_key="a" * 64)
+    with pytest.raises(ValueError):
+        await ElevenstProductPublisher().publish(None, None, idempotency_key="a" * 64)
     with pytest.raises(ValueError):
         await TossProductPublisher().publish(None, None, idempotency_key="a" * 64)

@@ -264,7 +264,8 @@ async def test_exchange_list_get_uses_official_datetime_query_and_withholds_pii(
     assert body["next_token"] is None
     assert len(body["items"]) == 1
     item = body["items"][0]
-    assert str(item["exchange_id"]) == "101"
+    assert item["exchange_id"].startswith("coupang-claim-hmac-v1:")
+    assert "101" not in item["exchange_id"]
     assert item["exchange_status"] == "PROGRESS"
     assert item["created_at"] == "2018-03-05T10:54:41"
     _withheld(body)
@@ -374,10 +375,14 @@ async def test_withdraw_list_get_uses_date_page_index_and_size() -> None:
     assert body["source_endpoint"] == "coupang:returnWithdrawRequests"
     assert body["next_page_index"] == "2"
     item = body["items"][0]
-    assert str(item["cancel_id"]) == "303"
+    assert item["cancel_id"].startswith("coupang-cancel-hmac-v1:")
+    assert "303" not in item["cancel_id"]
     assert item["refund_delivery_duty"] == "COM"
     assert item["created_at"] == "2018-11-06T23:50:39"
-    assert [str(value) for value in item["vendor_item_ids"]] == ["404"]
+    assert all(
+        value.startswith("coupang-line-hmac-v1:") and "404" not in value
+        for value in item["vendor_item_ids"]
+    )
     _withheld(body)
 
 

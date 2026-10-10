@@ -35,7 +35,7 @@ def test_unconnected_reads_are_official_gets_absent_from_mcp() -> None:
     operation_ids = {item.operation_id for item in reads}
     assert operation_ids.isdisjoint(READ_TOOL_NAMES)
     assert "commerce_get_rg_rfm_category_page" in READ_TOOL_NAMES
-    assert len(WRITE_TOOL_NAMES) == 3
+    assert len(WRITE_TOOL_NAMES) == 4  # naver·coupang·toss + 11st (CEO 2026-10-07)
     for item in reads:
         assert hasattr(CoupangClient, item.client_method)
         assert hasattr(CoupangGeneralAdapter, item.adapter_method)

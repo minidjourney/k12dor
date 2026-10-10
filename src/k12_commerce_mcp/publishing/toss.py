@@ -7,10 +7,11 @@ GET /api/v3/shopping-fep/products/{productId}/v2 for the readback.
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Any, Literal, Protocol
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
 
 from ..models.common import CanonicalModel
 from ..write_gate import DeferredWrite, assert_registration_enabled
@@ -61,6 +62,13 @@ class TossDraftStock(CanonicalModel):
     management_code: str | None = Field(default=None, min_length=1, max_length=100)
     representative_thumbnail_image: str | None = Field(default=None, max_length=255)
     images: tuple[TossDraftStockImage, ...] | None = None
+
+    @model_validator(mode="after")
+    def _sale_within_origin_price(self) -> TossDraftStock:
+        # origin_price 가 할인 전 가격, sale_price 가 실제 판매가다.
+        if self.sale_price > self.origin_price:
+            raise ValueError("sale_price cannot exceed origin_price")
+        return self
 
 
 class TossDraftImage(CanonicalModel):
@@ -140,11 +148,30 @@ class TossCanonicalDraft(CanonicalModel):
     management_code: str | None = Field(default=None, min_length=1, max_length=100)
     partner_name: str | None = Field(default=None, min_length=1, max_length=100)
     book_info: dict[str, Any] | None = None
+    # 상품 단위 할인 선언(원). 토스는 옵션마다 originPrice/salePrice 를 직접내므로
+    # 이 칸은 교차 검증용이며 몰 payload 에는 넣지 않는다.
+    discount_amount: int | None = Field(default=None, ge=1, le=999_999_990)
+
+    @model_serializer(mode="wrap")
+    def _omit_unset_discount(self, handler):  # type: ignore[no-untyped-def]
+        # 할인 선언이 없으면 승인 증빙(digest)이 예전과 같아야 한다 — 빈 칸은보내지 않는다.
+        data = handler(self)
+        if isinstance(data, dict) and data.get("discount_amount") is None:
+            data.pop("discount_amount", None)
+        return data
 
     @model_validator(mode="after")
     def validate_draft_constraints(self) -> TossCanonicalDraft:
         if not any(stock.is_main_price for stock in self.stocks):
             raise ValueError("at least one stock must carry the main price")
+        min_origin = min(stock.origin_price for stock in self.stocks)
+        if any(stock.is_main_price and stock.origin_price != min_origin for stock in self.stocks):
+            raise ValueError("is_main_price belongs on the lowest origin_price stock")
+        if self.discount_amount is not None and any(
+            stock.origin_price - stock.sale_price != self.discount_amount
+            for stock in self.stocks
+        ):
+            raise ValueError("discount_amount does not match the stock discounts")
         image_types = {image.type for image in self.images}
         if "THUMBNAIL" not in image_types:
             raise ValueError("at least one THUMBNAIL image is required")
@@ -168,13 +195,26 @@ class TossWriteClient(Protocol):
     async def get_product(self, *, product_id: int) -> dict[str, Any]: ...
 
 
+# CTO 2026-10-08: 토스 클라이언트가 만든 안전 요약(「; code=X; fields=a,b」)만 거절 이유에 붙인다.
+_SAFE_FAILURE_SUMMARY = re.compile(
+    r"^(?=; )(?:; (?:code|fields)=[A-Za-z0-9_.,\[\]-]{1,200}){0,2}"
+    r"(?:; msg=[0-9A-Za-z가-힣ㄱ-ㅎㅏ-ㅣ .,:()%·+~!?_-]{1,200})?$"
+)
+
+
 def _registered_product_id(created: Any) -> int:
     """Extract success.id from the documented resultType envelope."""
     if not isinstance(created, dict):
         raise ValueError("Toss registration response is incomplete")
     result_type = created.get("resultType")
     if result_type == "FAIL":
-        raise ValueError("Toss product registration was rejected")
+        summary = created.get("failure_summary")
+        safe = (
+            summary
+            if isinstance(summary, str) and _SAFE_FAILURE_SUMMARY.fullmatch(summary)
+            else ""
+        )
+        raise ValueError(f"Toss product registration was rejected{safe}")
     success = created.get("success")
     product_id = success.get("id") if isinstance(success, dict) else None
     if result_type != "SUCCESS" or type(product_id) is not int or product_id <= 0:
@@ -200,6 +240,8 @@ class TossProductPublisher:
     def _provider_payload(draft: TossCanonicalDraft) -> dict[str, Any]:
         dumped = draft.model_dump(mode="json", exclude_none=True)
         dumped.pop("channel", None)
+        # discount_amount 는 초안 선언용 칸이고 토스 본문에는 없다 — stocks 가 가격을 직접 담는다.
+        dumped.pop("discount_amount", None)
         return provider_payload_camelize(dumped)
 
     async def publish(
@@ -221,7 +263,17 @@ class TossProductPublisher:
         assert_registration_enabled(DeferredWrite.TOSS_PRODUCT_REGISTER)
         created = await self._client.register_product(self._provider_payload(draft))
         product_id = _registered_product_id(created)
-        readback = await self._client.get_product(product_id=product_id)
+        # 상품은 이미 만들어졌다 — 확인 읽기 실패를 「등록 실패」로 보고하면
+        # 재시도로 같은 상품이 두 번 등록될 수 있다.
+        try:
+            readback = await self._client.get_product(product_id=product_id)
+        except Exception:
+            return TossPublishResult(
+                status=TossPublishStatus.PENDING_VERIFICATION,
+                receipt_verified=False,
+                product_digest=provider_id_digest(approval.artifact_digest, product_id),
+                reason="provider readback failed",
+            )
         success = readback.get("success") if isinstance(readback, dict) else None
         verified = (
             isinstance(readback, dict)
@@ -233,6 +285,7 @@ class TossProductPublisher:
             return TossPublishResult(
                 status=TossPublishStatus.PENDING_VERIFICATION,
                 receipt_verified=False,
+                product_digest=provider_id_digest(approval.artifact_digest, product_id),
                 reason="provider readback did not confirm the registered product",
             )
         return TossPublishResult(

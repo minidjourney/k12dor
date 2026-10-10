@@ -12,6 +12,8 @@ from typing import Any
 
 import httpx
 
+from ..security import safe_provider_message
+
 with warnings.catch_warnings():
     warnings.simplefilter("ignore", DeprecationWarning)
     import crypt as _crypt
@@ -129,6 +131,74 @@ WRITE_ALLOWED_CALLS = frozenset(
 
 class NaverProviderError(RuntimeError):
     """Safe provider failure without upstream payload text."""
+
+
+_SAFE_ERROR_CODE = re.compile(r"^[A-Za-z0-9_.-]{1,60}$")
+_SAFE_FIELD_NAME = re.compile(r"^[A-Za-z0-9_.\[\]-]{1,120}$")
+
+
+def _safe_naver_error_summary(response: httpx.Response) -> str:
+    """「; code=X; fields=a,b」 — 오류 코드와 칸 이름만. 값·메시지 원문은 넣지 않는다."""
+    try:
+        if len(response.content) > 64 * 1024:
+            return ""
+        body = response.json()
+    except Exception:
+        # CTO 2026-10-08: JSON 이 아닌 거절(19:16 은 이유가 하나도 안 남았다)도
+        # 안전한 한 줄은 남긴다.
+        try:
+            raw_text = response.text[:600]
+            # HTML 오류 화면 등은 글자만 뭉개져 뜻이 없으므로 버린다.
+            said = "" if "<" in raw_text else safe_provider_message(raw_text, limit=120)
+        except Exception:
+            said = ""
+        return f"; msg={said}" if said else ""
+    if not isinstance(body, dict):
+        return ""
+    parts: list[str] = []
+    code = body.get("code")
+    if isinstance(code, str) and _SAFE_ERROR_CODE.fullmatch(code):
+        parts.append(f"code={code}")
+    inputs = body.get("invalidInputs")
+    names: list[str] = []
+    if isinstance(inputs, list):
+        for entry in inputs[:12]:
+            name = entry.get("name") if isinstance(entry, dict) else None
+            if isinstance(name, str) and _SAFE_FIELD_NAME.fullmatch(name) and name not in names:
+                names.append(name)
+            kind = entry.get("type") if isinstance(entry, dict) else None
+            safe_kind = isinstance(kind, str) and _SAFE_ERROR_CODE.fullmatch(kind)
+            if safe_kind and f"type={kind}" not in parts:
+                parts.append(f"type={kind}")
+    if names:
+        parts.append("fields=" + ",".join(names[:8]))
+    parts = parts[:6]
+    # CTO 2026-10-08 (19:16 거절 이유가 「HTTP 400」뿐이었다): 네이버가 적어 준 거절 문구
+    # (message·invalidInputs[].message)도 안전 검사를 거친 한 줄로 남긴다.
+    said: list[str] = []
+    if not parts:
+        # code 가 없는 모양이면 어떤 칸들이 왔는지(이름만) 남긴다 — 다음 진단용.
+        keys = [
+            key
+            for key in list(body)[:8]
+            if isinstance(key, str) and _SAFE_FIELD_NAME.fullmatch(key)
+        ]
+        if keys:
+            parts.append("keys=" + ",".join(keys))
+    for key in ("message", "error_description", "error", "detail", "title"):
+        top = safe_provider_message(body.get(key))
+        if top and top not in said:
+            said.append(top)
+    if isinstance(inputs, list):
+        for entry in inputs[:6]:
+            line = safe_provider_message(
+                entry.get("message") if isinstance(entry, dict) else None, limit=80
+            )
+            if line and line not in said:
+                said.append(line)
+    if said:
+        parts.append("msg=" + " · ".join(said)[:200].strip())
+    return ("; " + "; ".join(parts)) if parts else ""
 
 
 class NaverRequestError(ValueError):
@@ -322,7 +392,19 @@ class NaverClient:
         if response.status_code == 429:
             raise AdapterRateLimitError
         if response.status_code < 200 or response.status_code >= 300:
-            raise NaverProviderError(f"naver request failed with HTTP {response.status_code}")
+            # CTO 2026-10-08: 네이버가 거절하면 「왜」가 사라져 DOR 화면에
+            # 「올리지 못했습니다」만 남았다. 오류 코드와 잘못된 칸 「이름」만
+            # (값·메시지 원문 제외, 모양 검사 통과분만) 남긴다.
+            summary = _safe_naver_error_summary(response)
+            # CTO 2026-10-08: 사진 올리기에서 막혔는지 상품 만들기에서 막혔는지도 남긴다.
+            step = (
+                "image upload" if path == PRODUCT_IMAGE_UPLOAD_PATH
+                else "product create" if path == PRODUCT_CREATE_PATH
+                else "request"
+            )
+            raise NaverProviderError(
+                f"naver {step} failed with HTTP {response.status_code}{summary}"
+            )
         content_length = response.headers.get("content-length")
         if content_length is not None:
             try:

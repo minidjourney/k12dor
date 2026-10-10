@@ -176,6 +176,53 @@ def requirement_descriptor(row: Any) -> MarketplaceRequirementDescriptor:
     )
 
 
+def toss_option_descriptor(
+    row: Any, *, option_group: str
+) -> MarketplaceRequirementDescriptor:
+    """토스 제약 템플릿 한 줄 → 안전한 설명(CTO 2026-10-08).
+
+    토스 문서(상품 등록·카테고리 제약사항): 구매옵션(categorySalesOptions)은 2025-06-16부터
+    isOption 과 관계없이 전부 필수이고 stocks.options.groupName 으로 간다. 검색옵션
+    (categorySearchOptions)은 isOption=false 일 때만 필수이고 stocks.searchOption 으로 간다.
+    값 목록은 valueCandidates(빈 목록이면 자유), 단위는 unitValues(있으면 그 단위로 끝나야 함).
+    """
+    if not isinstance(row, dict):
+        raise AdapterInvalidResponseError("toss option template row is invalid")
+    # 문서 모양은 key·valueCandidates·unitValues 다.
+    # 옛/다른 모양(optionName·values 등)도 같은 뜻으로 읽는다.
+    key = _first_text(row, ("key",)) or _first_text(row, _DESCRIPTOR_KEY_KEYS) or _first_text(
+        row, _DESCRIPTOR_NAME_KEYS
+    )
+    if key is None:
+        raise AdapterInvalidResponseError("toss option template key is missing")
+    is_option = _first_bool(row, ("isOption",))
+    if option_group == "sales_option":
+        required = True
+    elif is_option is not None:
+        required = is_option is False
+    else:
+        required = _first_bool(row, _REQUIRED_KEYS) is True
+    values = _first_list(row, ("valueCandidates",))
+    units = _first_list(row, ("unitValues",))
+    return MarketplaceRequirementDescriptor(
+        key=key,
+        name=_first_text(row, _DESCRIPTOR_NAME_KEYS) or key,
+        required=required,
+        allowed_value_names=_names_from(
+            values if values is not None else _first_list(row, _VALUE_LIST_KEYS),
+            _VALUE_NAME_KEYS,
+            200,
+        ),
+        unit_names=_names_from(
+            units if units is not None else _first_list(row, _UNIT_LIST_KEYS),
+            _UNIT_NAME_KEYS,
+            50,
+        ),
+        image_allowed=False,
+        option_group="sales_option" if option_group == "sales_option" else "search_option",
+    )
+
+
 def group_descriptors(groups: Any) -> tuple[MarketplaceRequirementDescriptor, ...]:
     """Flatten bounded descriptor groups, one nesting level deep at most."""
     rows = _bounded(groups, MAX_NESTED_ROWS, "requirement group")

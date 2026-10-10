@@ -99,6 +99,7 @@ ALLOWED_WRITE_TOOLS = (
     "commerce_publish_naver_product",
     "commerce_publish_coupang_product",
     "commerce_publish_toss_product",
+    "commerce_publish_elevenst_product",
 )
 
 REJECTED_TOOL_NAMES = (
@@ -188,6 +189,34 @@ def test_toss_publish_call_validates_toss_result_shape(
         "product_digest",
         "reason",
     }
+
+
+def test_elevenst_publish_call_validates_elevenst_result_shape(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _SpyClient.next_result = _FakeCallResult(
+        {
+            "status": "rejected",
+            "receipt_verified": False,
+            "product_digest": None,
+            "reason": "11번가가 등록을 거절했습니다",
+        }
+    )
+    code, body = _run(
+        monkeypatch, capsys, _envelope("commerce_publish_elevenst_product", ARGUMENTS)
+    )
+    assert code == 0
+    assert body["ok"] is True
+    assert body["result"]["status"] == "rejected"
+    assert set(body["result"]) == {
+        "status",
+        "receipt_verified",
+        "product_digest",
+        "reason",
+    }
+    assert _SpyClient.instances[0].calls == [
+        ("commerce_publish_elevenst_product", ARGUMENTS)
+    ]
 
 
 def test_wrong_channel_result_shape_fails_closed(
@@ -386,3 +415,122 @@ def test_output_never_echoes_local_paths(
     code, body = _run(monkeypatch, capsys, raw)
     assert code == 1
     assert "echo-marker" not in json.dumps(body)
+
+
+# --- CTO 2026-10-08: 실패 이유(reason) — 서버 로그에서 안전한 글자만 -----------------
+import logging  # noqa: E402
+
+
+def _failing_call(exc: BaseException | None = None, *, rejected_fields: list[str] | None = None):
+    async def call_tool(self: _SpyClient, name: str, arguments: Any) -> _FakeCallResult:
+        self.calls.append((name, arguments))
+        server_logger = logging.getLogger(publish_tool.SERVER_LOGGER)
+        if rejected_fields is not None:
+            server_logger.info("Tool %r rejected arguments: %r", name, rejected_fields)
+        elif exc is not None:
+            try:
+                raise RuntimeError("Error executing tool") from exc
+            except RuntimeError:
+                server_logger.exception("Tool %r raised an unexpected exception", name)
+        return _FakeCallResult(None, is_error=True)
+
+    return call_tool
+
+
+def test_tool_failure_reports_safe_provider_reason(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class NaverProviderError(RuntimeError):
+        pass
+
+    provider = NaverProviderError(
+        "naver request failed with HTTP 400; code=BAD_REQUEST; "
+        "fields=originProduct.detailAttribute.productInfoProvidedNotice.etc.itemName"
+    )
+    monkeypatch.setattr(_SpyClient, "call_tool", _failing_call(provider))
+    code, body = _run(monkeypatch, capsys, _envelope("commerce_publish_naver_product", ARGUMENTS))
+    assert code == 1
+    assert body["ok"] is False and body["error"] == "commerce_mcp_publish_failed"
+    assert body["reason"].startswith("RuntimeError")  # wrapper class is not mcp.* here
+    # 실제 서버 래퍼(mcp.* 모듈)일 때는 원인까지 내려간다 — 아래 시험이 확인한다.
+
+
+def test_tool_failure_unwraps_mcp_wrapper_to_provider_cause() -> None:
+    class NaverProviderError(RuntimeError):
+        pass
+
+    class UnexpectedToolError(Exception):
+        pass
+
+    UnexpectedToolError.__module__ = "mcp.server.mcpserver.exceptions"
+    provider = NaverProviderError(
+        "naver request failed with HTTP 400; code=BAD_REQUEST; fields=a.b,c"
+    )
+    try:
+        try:
+            raise provider
+        except NaverProviderError as cause:
+            raise UnexpectedToolError("Error executing tool x") from cause
+    except UnexpectedToolError as wrapped:
+        reason = publish_tool._safe_reason(wrapped)
+    assert reason == (
+        "NaverProviderError: naver request failed with HTTP 400; "
+        "code=BAD_REQUEST; fields=a.b,c"
+    )
+
+
+@pytest.mark.parametrize(
+    "message",
+    (
+        "failed for https://api.example.com/v1/x",
+        "phone 010-1234-5678 rejected",
+        "input_value='secret value'",
+        "경로 /home/example/x",
+    ),
+)
+def test_unsafe_reason_text_collapses_to_class_name(message: str) -> None:
+    class ProviderError(RuntimeError):
+        pass
+
+    assert publish_tool._safe_reason(ProviderError(message)) == "ProviderError"
+
+
+def test_rejected_arguments_report_field_names_only(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        _SpyClient,
+        "call_tool",
+        _failing_call(rejected_fields=["draft.options.0.price", "bad field 'x'"]),
+    )
+    code, body = _run(monkeypatch, capsys, _envelope("commerce_publish_toss_product", ARGUMENTS))
+    assert code == 1
+    assert body["reason"] == "ValidationError: fields=draft.options.0.price"
+
+
+def test_failure_without_server_log_keeps_old_body(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _SpyClient.next_result = _FakeCallResult({"error": "provider secret body"}, is_error=True)
+    code, body = _run(monkeypatch, capsys, _envelope("commerce_publish_naver_product", ARGUMENTS))
+    assert code == 1
+    assert body == {"ok": False, "error": "commerce_mcp_publish_failed"}
+
+
+def test_provider_message_tail_survives_only_when_safe() -> None:
+    class NaverProviderError(RuntimeError):
+        pass
+
+    ok = NaverProviderError(
+        "naver product create failed with HTTP 400; code=BAD_REQUEST; "
+        "msg=판매가는 10원 단위로 입력해 주세요"
+    )
+    assert publish_tool._safe_reason(ok) == (
+        "NaverProviderError: naver product create failed with HTTP 400; code=BAD_REQUEST; "
+        "msg=판매가는 10원 단위로 입력해 주세요"
+    )
+    for tail in ("msg=https://evil.example.com/x", "msg=전화 010-1234-5678", "msg='quoted'"):
+        bad = NaverProviderError(f"naver product create failed with HTTP 400; {tail}")
+        assert publish_tool._safe_reason(bad) == (
+            "NaverProviderError: naver product create failed with HTTP 400"
+        )

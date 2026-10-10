@@ -9,6 +9,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
+from .adapters.coupang.mapper import _digest
 from .models.common import CanonicalModel
 from .security import assert_agent_safe_value
 
@@ -100,7 +101,7 @@ def _shape(payload: object) -> tuple[list, dict] | None:
     return rows, payload
 
 
-def _project_exchange(payload: object) -> ExchangePage:
+def _project_exchange(payload: object, *, secret: str, vendor: str) -> ExchangePage:
     parsed = _shape(payload)
     if parsed is None:
         return _closed(ExchangePage, "incomplete", "invalid_provider_shape")
@@ -122,7 +123,13 @@ def _project_exchange(payload: object) -> ExchangePage:
             or _date_value(when, timestamp=True) is None
         ):
             return _closed(ExchangePage, "incomplete", "invalid_provider_shape")
-        projected.append({"exchange_id": identifier, "exchange_status": status, "created_at": when})
+        projected.append(
+            {
+                "exchange_id": _digest(secret, "claim", vendor, identifier),
+                "exchange_status": status,
+                "created_at": when,
+            }
+        )
     page = ExchangePage.model_validate(
         {
             "channel": "coupang_general",
@@ -140,7 +147,7 @@ def _project_exchange(payload: object) -> ExchangePage:
     return page
 
 
-def _project_withdraw(payload: object) -> WithdrawPage:
+def _project_withdraw(payload: object, *, secret: str, vendor: str) -> WithdrawPage:
     parsed = _shape(payload)
     if parsed is None:
         return _closed(WithdrawPage, "incomplete", "invalid_provider_shape")
@@ -170,10 +177,13 @@ def _project_withdraw(payload: object) -> WithdrawPage:
             return _closed(WithdrawPage, "incomplete", "invalid_provider_shape")
         projected.append(
             {
-                "cancel_id": identifier,
+                "cancel_id": _digest(secret, "cancel", vendor, identifier),
                 "refund_delivery_duty": duty,
                 "created_at": when,
-                "vendor_item_ids": safe_options,
+                "vendor_item_ids": [
+                    _digest(secret, "line", vendor, identifier, option)
+                    for option in safe_options
+                ],
             }
         )
     page = WithdrawPage.model_validate(
@@ -222,8 +232,14 @@ async def read_exchange_requests(
     if client is None:
         return _closed(ExchangePage, "unavailable", "client_not_configured")
     try:
-        vendor = client.credentials.vendor_id
-        if not re.fullmatch(r"A[0-9A-Za-z]{3,20}", vendor):
+        credentials = client.credentials
+        vendor = credentials.vendor_id
+        secret = credentials.secret_key
+        if (
+            not re.fullmatch(r"A[0-9A-Za-z]{3,20}", vendor)
+            or not isinstance(secret, str)
+            or not secret
+        ):
             return _closed(ExchangePage, "unavailable", "client_not_configured")
         query = [("createdAtFrom", created_at_from), ("createdAtTo", created_at_to)]
         for key, value in (
@@ -237,7 +253,7 @@ async def read_exchange_requests(
         payload = await client._get(f"{BASE}/{vendor}/exchangeRequests", query)
     except Exception:
         return _closed(ExchangePage, "unavailable", "provider_unavailable")
-    return _project_exchange(payload)
+    return _project_exchange(payload, secret=secret, vendor=vendor)
 
 
 async def read_return_withdraw_requests(
@@ -263,8 +279,14 @@ async def read_return_withdraw_requests(
     if client is None:
         return _closed(WithdrawPage, "unavailable", "client_not_configured")
     try:
-        vendor = client.credentials.vendor_id
-        if not re.fullmatch(r"A[0-9A-Za-z]{3,20}", vendor):
+        credentials = client.credentials
+        vendor = credentials.vendor_id
+        secret = credentials.secret_key
+        if (
+            not re.fullmatch(r"A[0-9A-Za-z]{3,20}", vendor)
+            or not isinstance(secret, str)
+            or not secret
+        ):
             return _closed(WithdrawPage, "unavailable", "client_not_configured")
         query = [
             ("dateFrom", date_from),
@@ -275,4 +297,4 @@ async def read_return_withdraw_requests(
         payload = await client._get(f"{BASE}/{vendor}/returnWithdrawRequests", query)
     except Exception:
         return _closed(WithdrawPage, "unavailable", "provider_unavailable")
-    return _project_withdraw(payload)
+    return _project_withdraw(payload, secret=secret, vendor=vendor)

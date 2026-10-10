@@ -17,6 +17,7 @@ import os
 import sys
 
 from mcp import Client
+from mcp.types import ImageContent
 
 from k12_commerce_mcp.server import build_live_server
 
@@ -31,6 +32,7 @@ ALLOWED_TOOLS = frozenset(
         "commerce_get_products",
         "commerce_get_product_detail",
         "commerce_get_product_content",
+        "commerce_get_product_image",
         "commerce_get_inventory",
         "commerce_get_fees",
         "commerce_get_returns",
@@ -45,6 +47,16 @@ ALLOWED_TOOLS = frozenset(
         "commerce_get_rg_order_detail",
         "commerce_get_marketplace_category_requirements",
         "commerce_get_marketplace_registration_resources",
+        "commerce_get_naver_registration_defaults",
+        "commerce_get_elevenst_registration_options",
+        "commerce_get_elevenst_product",
+        "commerce_get_elevenst_categories",
+        # OPUS-4 워커 C: 몰 등록 칸 자동 채움(토스 고시·배송지, 11번가 기존 상품 기본값).
+        "commerce_get_elevenst_registered_defaults",
+        "commerce_get_toss_notice_categories",
+        "commerce_get_toss_notice_items",
+        "commerce_get_toss_registration_locations",
+        "commerce_get_mall_listing_status",
     }
 )
 
@@ -69,7 +81,18 @@ def _parse_request(raw: bytes) -> tuple[str, dict]:
 async def _call(client: Client, raw: bytes) -> dict:
     tool, arguments = _parse_request(raw)
     result = await client.call_tool(tool, arguments)
-    if result.is_error or not isinstance(result.structured_content, dict):
+    if result.is_error:
+        raise RuntimeError("Commerce MCP read failed")
+    if tool == "commerce_get_product_image":
+        images = [item for item in result.content if isinstance(item, ImageContent)]
+        if len(images) != 1 or images[0].mime_type not in {
+            "image/png", "image/jpeg", "image/gif", "image/webp"
+        }:
+            raise RuntimeError("Commerce MCP image failed")
+        return {"ok": True, "result": {
+            "mime_type": images[0].mime_type, "data": images[0].data
+        }}
+    if not isinstance(result.structured_content, dict):
         raise RuntimeError("Commerce MCP read failed")
     return {"ok": True, "result": result.structured_content}
 
@@ -91,13 +114,11 @@ async def _main() -> int:
     raw = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
     if len(raw) > MAX_INPUT_BYTES:
         raise ValueError("request exceeds limit")
-    tool, arguments = _parse_request(raw)
+    _parse_request(raw)  # Reject before constructing a secret-bearing live server.
     async with Client(build_live_server()) as client:
-        result = await client.call_tool(tool, arguments)
-    if result.is_error or not isinstance(result.structured_content, dict):
-        raise RuntimeError("Commerce MCP read failed")
+        response = await _call(client, raw)
     sys.stdout.write(
-        json.dumps({"ok": True, "result": result.structured_content}, separators=(",", ":"))
+        json.dumps(response, separators=(",", ":"))
     )
     return 0
 

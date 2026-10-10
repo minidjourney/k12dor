@@ -16,19 +16,22 @@ class DeferredWrite(StrEnum):
 
     COUPANG_SELLER_PRODUCT_CREATE = "coupang_seller_product_create"
     COUPANG_SELLER_PRODUCT_UPDATE = "coupang_seller_product_update"
+    ELEVENST_PRODUCT_REGISTER = "elevenst_product_register"
     NAVER_PRODUCT_CREATE = "naver_product_create"
     TOSS_PRODUCT_REGISTER = "toss_product_register"
 
 
 DEFERRED_WRITE_NAMES: tuple[str, ...] = tuple(write.value for write in DeferredWrite)
 
-# CEO 2026-09-19: only these three product-registration writes may unseal, and
-# only after approval evidence validates inside the publisher. Every other
-# mutation (for example COUPANG_SELLER_PRODUCT_UPDATE) stays deferred.
+# CEO 2026-09-19: only these product-registration writes may unseal, and
+# only after approval evidence validates inside the publisher. CEO 2026-10-07
+# msg 2780 approved 11st registration under the same evidence rule. Every
+# other mutation (for example COUPANG_SELLER_PRODUCT_UPDATE) stays deferred.
 APPROVAL_RELEASED_WRITES: tuple[DeferredWrite, ...] = (
     DeferredWrite.COUPANG_SELLER_PRODUCT_CREATE,
     DeferredWrite.NAVER_PRODUCT_CREATE,
     DeferredWrite.TOSS_PRODUCT_REGISTER,
+    DeferredWrite.ELEVENST_PRODUCT_REGISTER,
 )
 APPROVAL_RELEASED_WRITE_NAMES: tuple[str, ...] = tuple(
     write.value for write in APPROVAL_RELEASED_WRITES
@@ -36,7 +39,7 @@ APPROVAL_RELEASED_WRITE_NAMES: tuple[str, ...] = tuple(
 
 
 def registration_enabled(write: DeferredWrite | None = None) -> bool:
-    """True only for the three CEO-released product-registration writes.
+    """True only for the CEO-released product-registration writes.
 
     There is no environment or runtime override; released writes still require
     validated approval evidence before any provider client call runs.
