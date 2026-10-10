@@ -1,19 +1,19 @@
 # 전체 MCP 도구 목록
 
-현재 서버 등록 **136개**. READ 권한에는 차단·시뮬레이션·로컬 초안도 포함됩니다.
+현재 서버 등록 **146개**. READ 권한에는 차단·시뮬레이션·로컬 초안도 포함됩니다.
 등록과 실제 제공자 조회 가능/성공은 다릅니다. 아래 분류는 코드 계약 기반이며 현재 계정의 live probe가 아닙니다.
 정확한 nested 입력·출력 구조, enum, default, pattern과 상한은 [TOOLS.json](TOOLS.json)이 기준입니다.
 MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 달라집니다.
 
 ## 분류별 수
-- 건별 승인 필요 WRITE: 3개
+- 건별 승인 필요 WRITE: 4개
 - 공용 채널 조회: 9개
-- 독립 제공자 READ: 56개
+- 독립 제공자 READ: 64개
 - 등록 참고정보 READ: 3개
 - 로컬 전용: 9개
 - 무전송 차단: 53개
 - 이미지 READ: 1개
-- 이번 범위 밖: 2개
+- 이번 범위 밖: 3개
 
 - 무전송 차단: 이름이 GET/READ여도 제공자 요청 없이 거부합니다.
 - 로컬 전용: 초안·정규화·상태·무전송 시뮬레이션. 일부 계약 목록에는 미배포 Wiki 원본이 필요합니다.
@@ -169,6 +169,10 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 
 - 권한: **read** · 분류: **독립 제공자 READ**
 - 역할: Read GET /v4/vendors/{vendorId}/exchangeRequests; never return customer data.
+        created_at_from/created_at_to: local datetimes YYYY-MM-DDTHH:MM:SS (no
+        timezone suffix; date-only and minute-precision forms are rejected)
+        spanning a window shorter than 7 days. Claim ids are opaque digests.
+
 - `created_at_from`: 필수 · string
 - `created_at_to`: 필수 · string
 - `status`: 선택 · string | null · 기본값 null
@@ -380,6 +384,9 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 
 - 권한: **read** · 분류: **독립 제공자 READ**
 - 역할: Read GET /v4/vendors/{vendorId}/returnWithdrawRequests without customer data.
+        date_from/date_to: YYYY-MM-DD spanning at most 7 inclusive days.
+        Claim and item ids are opaque digests.
+
 - `date_from`: 필수 · string
 - `date_to`: 필수 · string
 - `page_index`: 선택 · integer · 기본값 1
@@ -434,6 +441,22 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 - 출력 최상위 필드: `status`, `events`, `source_endpoint`, `reasons`
 - 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_coupang_shipment_history`
 
+### `commerce_get_elevenst_categories`
+
+- 권한: **read** · 분류: **이번 범위 밖**
+- 역할: Read the unauthenticated 11st category list with leaf flags.
+- 입력: `{}` (인자 없음)
+- 출력 최상위 필드: `status`, `items`, `total_count`, `reasons`
+- 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_elevenst_categories`
+
+### `commerce_get_elevenst_product`
+
+- 권한: **read** · 분류: **독립 제공자 READ**
+- 역할: Read one 11st seller product summary by product number.
+- `product_no`: 필수 · string · pattern="^[1-9][0-9]{0,19}$"
+- 출력 최상위 필드: `status`, `product`, `reasons`
+- 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_elevenst_product`
+
 ### `commerce_get_elevenst_public_categories`
 
 - 권한: **read** · 분류: **이번 범위 밖**
@@ -444,13 +467,42 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 - 출력 최상위 필드: `status`, `items`, `next_cursor`, `total_count`, `source_endpoint`, `reasons`
 - 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_elevenst_public_categories`
 
+### `commerce_get_elevenst_registered_defaults`
+
+- 권한: **read** · 분류: **독립 제공자 READ**
+- 역할: Most-used seller-policy values across our registered 11st products (GET 1620/1621).
+
+        product_nos: 11st product numbers (max 20); seller_product_codes: seller product
+        codes resolved by GET 1621 (max 10). 11st has no GET list of our own products, so
+        with neither argument nothing is called and sample_count is 0. Each field returns
+        {value, count, candidates, conflict}. Seller-published A/S and return text may carry
+        the company phone number; buyer data, addresses and HTML are never read.
+
+- `product_nos`: 선택 · array · 기본값 [] · maxItems=20
+- `seller_product_codes`: 선택 · array · 기본값 [] · maxItems=10
+- 출력 최상위 필드: `status`, `sample_count`, `requested`, `reasons`, `notice`, `notice_agree_count`, `notice_type_candidates`, `as_detail`, `return_exchange_detail`, `category_no`, `tax_code`, `minor_purchasable`, `beef_trace`, `raw_material_type`, `origin`, `delivery`
+- 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_elevenst_registered_defaults`
+
+### `commerce_get_elevenst_registration_options`
+
+- 권한: **read** · 분류: **독립 제공자 READ**
+- 역할: Read 11st seller registration selectors; no address or contact data.
+- 입력: `{}` (인자 없음)
+- 출력 최상위 필드: `status`, `outbound_places`, `return_places`, `send_close_templates`, `reasons`
+- 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_elevenst_registration_options`
+
 ### `commerce_get_fees`
 
 - 권한: **read** · 분류: **공용 채널 조회**
 - 역할: Return only fee values actually reported by the marketplace API.
+
+        business_date (KST pay date) narrows the Naver commission read to that
+        day; other channels ignore it.
+
 - `channel`: 필수 · Channel
 - `page_size`: 선택 · integer · 기본값 50 · minimum=1 · maximum=100
 - `cursor`: 선택 · string | null · 기본값 null
+- `business_date`: 선택 · string | null · 기본값 null
 - 출력 최상위 필드: `schema_version`, `status`, `channel`, `next_cursor`, `reasons`, `errors`, `items`
 - 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_fees`
 
@@ -464,6 +516,23 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 - `vendor_item_id`: 선택 · string | null · 기본값 null
 - 출력 최상위 필드: `schema_version`, `status`, `channel`, `next_cursor`, `reasons`, `errors`, `items`, `summary`, `groups`
 - 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_inventory`
+
+### `commerce_get_mall_listing_status`
+
+- 권한: **read** · 분류: **독립 제공자 READ**
+- 역할: 몰 등록 상태 읽기 (RV-20261009 CONTRACT 3절) — 읽기 전용.
+
+        최신 상품 목록 최대 3쪽(쪽당 50)에서 artifact·product digest 또는
+        management_codes(토스만, 상세 GET 최대 20번)로 상품 하나를 찾아
+        2절 상태 낱말(on_sale·inspection_waiting·inspection_rejected·
+        not_on_sale·unknown)로 돌려준다. 상품 번호 원문은 나가지 않는다.
+
+- `channel`: 필수 · enum ["naver", "toss_store"]
+- `artifact_digests`: 선택 · array · 기본값 [] · maxItems=10
+- `product_digests`: 선택 · array · 기본값 [] · maxItems=20
+- `management_codes`: 선택 · array · 기본값 [] · maxItems=50
+- 출력 최상위 필드: `schema_version`, `channel`, `status`, `match`, `listing`, `candidates_scanned`, `reasons`
+- 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_mall_listing_status`
 
 ### `commerce_get_marketplace_categories`
 
@@ -506,7 +575,7 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 ### `commerce_get_naver_attribute_units`
 
 - 권한: **read** · 분류: **독립 제공자 READ**
-- 역할: Read one documented Naver reference GET with safe bounded projection.
+- 역할: Read GET /v1/product-attributes/attribute-value-units; query must be omitted.
 - `query`: 선택 · string | null · 기본값 null
 - `page_size`: 선택 · integer · 기본값 100 · minimum=1 · maximum=100
 - `cursor`: 선택 · string | null · 기본값 null
@@ -516,7 +585,7 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 ### `commerce_get_naver_attribute_values`
 
 - 권한: **read** · 분류: **독립 제공자 READ**
-- 역할: Read one documented Naver reference GET with safe bounded projection.
+- 역할: Read GET /v1/product-attributes/attribute-values; query = numeric categoryId (required).
 - `query`: 선택 · string | null · 기본값 null
 - `page_size`: 선택 · integer · 기본값 100 · minimum=1 · maximum=100
 - `cursor`: 선택 · string | null · 기본값 null
@@ -526,7 +595,7 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 ### `commerce_get_naver_attributes`
 
 - 권한: **read** · 분류: **독립 제공자 READ**
-- 역할: Read one documented Naver reference GET with safe bounded projection.
+- 역할: Read GET /v1/product-attributes/attributes; query = numeric categoryId (required, e.g. from commerce_get_naver_subcategories).
 - `query`: 선택 · string | null · 기본값 null
 - `page_size`: 선택 · integer · 기본값 100 · minimum=1 · maximum=100
 - `cursor`: 선택 · string | null · 기본값 null
@@ -536,7 +605,7 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 ### `commerce_get_naver_brands`
 
 - 권한: **read** · 분류: **독립 제공자 READ**
-- 역할: Read one documented Naver reference GET with safe bounded projection.
+- 역할: Read GET /v1/product-brands; query = brand name (required, 80 chars max).
 - `query`: 선택 · string | null · 기본값 null
 - `page_size`: 선택 · integer · 기본값 100 · minimum=1 · maximum=100
 - `cursor`: 선택 · string | null · 기본값 null
@@ -581,6 +650,8 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 - 역할: read-channel-product-1-product GET /v2/products/channel-products/:channelProductNo.
 
         Closed catalog projection only; no same-path mutations, contact or raw content.
+        channelProductNo: positive int64; the digit-string external_product_id
+        from commerce_get_products is also accepted.
 
 - `channelProductNo`: 필수 · integer
 - 출력 최상위 필드: `channel`, `operation_id`, `status`, `reasons`, `item`
@@ -652,6 +723,8 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 - 권한: **read** · 분류: **독립 제공자 READ**
 - 역할: Read GET /v1/product-delivery-info/bundle-groups/:deliveryBundleGroupId.
         Operation: get-delivery-bundle-group-product.
+        deliveryBundleGroupId: int64 id from commerce_get_naver_delivery_bundle_groups;
+        a digit string is also accepted.
 
 - `deliveryBundleGroupId`: 필수 · integer
 - 출력 최상위 필드: `channel`, `operation_id`, `status`, `reasons`, `item`
@@ -752,7 +825,7 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 ### `commerce_get_naver_manufacturers`
 
 - 권한: **read** · 분류: **독립 제공자 READ**
-- 역할: Read one documented Naver reference GET with safe bounded projection.
+- 역할: Read GET /v1/product-manufacturers; query = manufacturer name (required, 80 chars max).
 - `query`: 선택 · string | null · 기본값 null
 - `page_size`: 선택 · integer · 기본값 100 · minimum=1 · maximum=100
 - `cursor`: 선택 · string | null · 기본값 null
@@ -762,7 +835,7 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 ### `commerce_get_naver_origin_area_by_name`
 
 - 권한: **read** · 분류: **독립 제공자 READ**
-- 역할: Read one documented Naver reference GET with safe bounded projection.
+- 역할: Read GET /v1/product-origin-areas/query; query = origin area name (required).
 - `query`: 선택 · string | null · 기본값 null
 - `page_size`: 선택 · integer · 기본값 100 · minimum=1 · maximum=100
 - `cursor`: 선택 · string | null · 기본값 null
@@ -772,7 +845,7 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 ### `commerce_get_naver_origin_areas`
 
 - 권한: **read** · 분류: **독립 제공자 READ**
-- 역할: Read one documented Naver reference GET with safe bounded projection.
+- 역할: Read GET /v1/product-origin-areas; query must be omitted.
 - `query`: 선택 · string | null · 기본값 null
 - `page_size`: 선택 · integer · 기본값 100 · minimum=1 · maximum=100
 - `cursor`: 선택 · string | null · 기본값 null
@@ -785,6 +858,7 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 - 역할: read-origin-product-product GET /v2/products/origin-products/:originProductNo.
 
         Closed catalog projection only; no same-path mutations, contact or raw content.
+        originProductNo: positive int64; a digit string is also accepted.
 
 - `originProductNo`: 필수 · integer
 - 출력 최상위 필드: `channel`, `operation_id`, `status`, `reasons`, `item`
@@ -896,6 +970,24 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 - 출력 최상위 필드: `channel`, `kind`, `status`, `items`, `page_count`, `total_count`, `has_more`, `next_cursor`, `reasons`
 - 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_naver_reference_page`
 
+### `commerce_get_naver_registration_defaults`
+
+- 권한: **read** · 분류: **독립 제공자 READ**
+- 역할: Registered Naver product's registration values for DOR defaults (read-only).
+
+        Exactly one of originProductNo / channelProductNo. A channel product number
+        (the id kept on orders and SKU links) is resolved to its origin product first.
+        Returns only origin area, minor purchase, notice type+items, A/S guide text,
+        the seller-registered A/S contact (as_telephone and the notice items
+        afterServiceDirector / customerServicePhoneNumber — company contact, CEO
+        2026-10-07), shipping/return address-book ids (numbers only) and delivery
+        fee policy. Never buyer data, other phone fields, or address text.
+
+- `originProductNo`: 선택 · integer · 기본값 null
+- `channelProductNo`: 선택 · integer · 기본값 null
+- 출력 최상위 필드: `channel`, `operation_id`, `status`, `reasons`, `origin_product_no`, `item`
+- 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_naver_registration_defaults`
+
 ### `commerce_get_naver_restricted_tags`
 
 - 권한: **read** · 분류: **무전송 차단**
@@ -990,6 +1082,9 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 
 - 권한: **read** · 분류: **독립 제공자 READ**
 - 역할: get-size-type-vo-product GET /v1/product-sizes/:sizeTypeId; closed single object.
+        sizeTypeId: int64 id from commerce_get_naver_size_types;
+        a digit string is also accepted.
+
 - `sizeTypeId`: 필수 · integer
 - 출력 최상위 필드: `channel`, `operation_id`, `status`, `reasons`, `item`
 - 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_naver_size_type`
@@ -1068,7 +1163,7 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 ### `commerce_get_naver_sub_origin_areas`
 
 - 권한: **read** · 분류: **독립 제공자 READ**
-- 역할: Read one documented Naver reference GET with safe bounded projection.
+- 역할: Read GET /v1/product-origin-areas/sub-origin-areas; query = parent area code (optional).
 - `query`: 선택 · string | null · 기본값 null
 - `page_size`: 선택 · integer · 기본값 100 · minimum=1 · maximum=100
 - `cursor`: 선택 · string | null · 기본값 null
@@ -1278,6 +1373,29 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 - 출력 최상위 필드: `schema_version`, `status`, `channel`, `next_cursor`, `reasons`, `errors`, `items`
 - 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_settlements`
 
+### `commerce_get_toss_notice_categories`
+
+- 권한: **read** · 분류: **독립 제공자 READ**
+- 역할: Toss 상품정보제공고시 카테고리 코드 목록 (GET notices/category-codes).
+
+        items: [{category_code, name, first_category_name, second_category_name}].
+
+- 입력: `{}` (인자 없음)
+- 출력 최상위 필드: `status`, `items`, `skipped_rows`, `reasons`, `source`
+- 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_toss_notice_categories`
+
+### `commerce_get_toss_notice_items`
+
+- 권한: **read** · 분류: **독립 제공자 READ**
+- 역할: Toss 고시 항목 목록 for one category code (GET notices?categoryCode=).
+
+        items: [{notice_id, title, order, required, required_basis, default_hint}] — titles
+        only; content is the seller's to fill.
+
+- `category_code`: 필수 · string · pattern="^[A-Za-z0-9_-]{1,64}$"
+- 출력 최상위 필드: `status`, `category_code`, `items`, `skipped_rows`, `reasons`, `source`
+- 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_toss_notice_items`
+
 ### `commerce_get_toss_price_compare_products`
 
 - 권한: **read** · 분류: **이번 범위 밖**
@@ -1286,6 +1404,18 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 - `cursor`: 선택 · string | null · 기본값 null
 - 출력 최상위 필드: `status`, `items`, `next_cursor`, `reason`
 - 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_toss_price_compare_products`
+
+### `commerce_get_toss_registration_locations`
+
+- 권한: **read** · 분류: **독립 제공자 READ**
+- 역할: Toss 배송비 묶음 그룹·교환반품지 번호 (GET .../delivery-location/v2,
+        GET .../exchange-refund-location/v2).
+
+        Only {location_id, name, is_main} — never address, zip code or contact text.
+
+- 입력: `{}` (인자 없음)
+- 출력 최상위 필드: `status`, `delivery_locations`, `exchange_refund_locations`, `delivery_locations_has_more`, `exchange_refund_locations_has_more`, `skipped_rows`, `reasons`
+- 정확한 전체 schema: `TOOLS.json` → name = `commerce_get_toss_registration_locations`
 
 ### `commerce_health_check`
 
@@ -1365,6 +1495,16 @@ MCP 앱의 도구 필터와 채널 인증·지원 상태에 따라 가용성이 
 - `idempotency_key`: 필수 · string · pattern="^[a-f0-9]{64}$"
 - 출력 최상위 필드: `status`, `receipt_verified`, `seller_product_digest`, `reason`
 - 정확한 전체 schema: `TOOLS.json` → name = `commerce_publish_coupang_product`
+
+### `commerce_publish_elevenst_product`
+
+- 권한: **write** · 분류: **건별 승인 필요 WRITE**
+- 역할: Publish one approved canonical draft to 11st (euc-kr XML) and verify it by GET.
+- `draft`: 필수 · ElevenstCanonicalDraft
+- `approval`: 필수 · ElevenstApprovalEvidence
+- `idempotency_key`: 필수 · string · pattern="^[a-f0-9]{64}$"
+- 출력 최상위 필드: `status`, `receipt_verified`, `product_digest`, `reason`
+- 정확한 전체 schema: `TOOLS.json` → name = `commerce_publish_elevenst_product`
 
 ### `commerce_publish_naver_product`
 

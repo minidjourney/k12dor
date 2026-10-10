@@ -38,6 +38,7 @@ fi
 - 쿠팡 일반·RG: `DOR_COUPANG_VENDOR_ID`, `DOR_COUPANG_ACCESS_KEY`, `DOR_COUPANG_SECRET_KEY`
 - 네이버: `DOR_NAVER_CLIENT_ID`, `DOR_NAVER_CLIENT_SECRET`
 - 토스 쇼핑: `DOR_TOSS_SHOPPING_ACCESS_KEY`, `DOR_TOSS_SHOPPING_SECRET_KEY`
+- 11번가 판매자 인증 READ·등록(선택): `DOR_11ST_API_KEY` — 비워 두면 11번가 판매자 도구는 구성되지 않습니다.
 
 한 채널의 필수 값이 모두 있어야 그 채널의 adapter/client가 구성됩니다. 사용하지 않는 채널은 빈 값으로 두세요. 빈 템플릿의 존재만으로 실계정 조회가 활성화되지는 않습니다. 키는 각 제공자가 발급하며 별도의 계정 권한/IP 조건 등이 적용될 수 있습니다.
 

@@ -8,7 +8,7 @@
 - 상품·옵션·가격·재고·주문·클레임·정산·수수료·카테고리/등록 참고정보를 지원 범위 내에서 안전하게 투영합니다.
 - RG 판매가와 본문 이미지, 네이버 표준옵션 이미지 구조 및 본문 이미지 참조/취득을 포함합니다.
 - 미확인 값은 `null` 또는 상태/사유로 표시하며 매출·정산·이익을 임의로 동일시하지 않습니다.
-- **등록 도구 136개 = READ 권한 133개 + WRITE 권한 3개.** READ 권한에는 로컬 초안·시뮬레이션·무전송 차단 도구도 포함됩니다. 136개가 전부 실제 조회 가능한 API라는 뜻은 아닙니다.
+- **등록 도구 146개 = READ 권한 142개 + WRITE 권한 4개.** READ 권한에는 로컬 초안·시뮬레이션·무전송 차단 도구도 포함됩니다. 146개가 전부 실제 조회 가능한 API라는 뜻은 아닙니다.
 - 실제 쇼핑몰 변경은 **건별 승인** 대상입니다. 기본 설치에서 변경 실행 전제조건을 설정하지 않으면 WRITE는 거부됩니다.
 
 ### 바로 시작
@@ -36,11 +36,13 @@ uv run python scripts/smoke_offline.py
 - [QUICKSTART](docs/QUICKSTART.md): Linux/macOS/WSL 설치·인증 파일·첫 실행·문제 해결
 - [MCP_CLIENTS](docs/MCP_CLIENTS.md): 일반 MCP 앱 / Hermes 설정 형태
 - [USAGE](docs/USAGE.md): 조회 순서·페이지·상품/이미지·오류·로컬 초안
-- [TOOLS](docs/TOOLS.md): **전체 136개** 이름·역할·권한·필수/선택 인자·지원 경계
+- [TOOLS](docs/TOOLS.md): **전체 146개** 이름·역할·권한·필수/선택 인자·지원 경계
 - [TOOLS.json](docs/TOOLS.json): 전체 도구의 정확한 입력·출력 JSON Schema
+- [CHANGES](docs/CHANGES.md): 공개 이후 바뀐 점과 새 도구 한 줄 설명
 - [LIMITATIONS](docs/LIMITATIONS.md): 차단·미지원·실검증 공백·원격/WRITE 경계
 - [ARCHITECTURE](docs/ARCHITECTURE.md): 구조·진입점·보안·개발 명령
 - [VERIFICATION](docs/VERIFICATION.md): 시험 종류와 확인 범위의 구분
+- [PUBLISHING](docs/PUBLISHING.md): 공개 저장소 동기화 규칙과 공개용 바꾸기 목록
 - [SECURITY](SECURITY.md): 인증정보·실데이터·공개 저장소 안전 수칙
 
 ### 개발 명령

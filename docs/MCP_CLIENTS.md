@@ -43,7 +43,7 @@ mcp_servers:
     connect_timeout: 60
 ```
 
-Hermes 내부 도구 이름에는 `mcp_서버명_도구명` 접두사가 붙을 수 있습니다. 서버 등록의 136개와 AI 앱이 필터링 후 노출하는 개수는 다를 수 있습니다. 공식 참고: https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp
+Hermes 내부 도구 이름에는 `mcp_서버명_도구명` 접두사가 붙을 수 있습니다. 서버 등록의 146개와 AI 앱이 필터링 후 노출하는 개수는 다를 수 있습니다. 공식 참고: https://hermes-agent.nousresearch.com/docs/user-guide/features/mcp
 
 ## 원격 HTTP는 별도 배포
 

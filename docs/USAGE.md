@@ -58,7 +58,7 @@ MCP 클라이언트에서는 `tool`을 도구 이름으로, `arguments`를 인�
 
 ## 기존 READ 브리지 스크립트
 
-`scripts/call_commerce_read_tool.py`는 고정 allowlist의 일부 JSON READ만 지원합니다. 모든 136개를 지원하지 않으며 native image 도구는 포함하지 않습니다.
+`scripts/call_commerce_read_tool.py`는 고정 allowlist의 일부 JSON READ만 지원합니다. 모든 146개를 지원하지 않으며 native image 도구는 포함하지 않습니다.
 
 ```bash
 printf '%s' '{"tool":"commerce_health_check","arguments":{}}' | uv run python scripts/call_commerce_read_tool.py

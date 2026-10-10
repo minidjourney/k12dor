@@ -4,7 +4,7 @@
 
 - `k12-commerce-mcp`: 실제 구성의 stdio 서버. 시작 시 로컬 인증 파일을 읽지만 health/channels/capabilities는 제공자 probe를 하지 않습니다.
 - `k12-commerce-mcp-mock`: 합성 mock 채널의 오프라인 stdio 서버.
-- `k12-commerce-mcp-11st-public`: 11번가 공개 카테고리 GET opt-in. 판매자 인증 API 활성화 아님.
+- `k12-commerce-mcp-11st-public`: 11번가 공개 카테고리 GET opt-in(인증값을 붙이지 않음). 판매자 인증 READ·등록은 이 진입점과 별개로 인증 파일에 `DOR_11ST_API_KEY`가 있을 때만 구성됩니다.
 - `k12-commerce-mcp-remote`: Bearer 보호 Streamable HTTP. 기본 host는 127.0.0.1이고 접근키 미구성은 시작 거부. 원격 네트워크 배포는 별도 범위.
 
 ## 파일 구조

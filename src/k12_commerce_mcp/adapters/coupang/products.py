@@ -19,11 +19,13 @@ from ...models.products import ProductImage, ProductImageReference, ProductOptio
 from ...product_images import (
     _withhold_coupang_phone_asset,
     body_images,
+    bounded_role_images,
+    bounded_role_refs,
     coupang_branches,
     coupang_image_refs,
     coupang_image_url,
     coupang_images,
-    unique_images,
+    coupang_images_with_truncation,
 )
 from ...product_options import money, option_completeness, option_id
 from ..base import AdapterFailure, AdapterInvalidResponseError
@@ -511,15 +513,16 @@ class CoupangProductsMixin:
         description = _detail_text(scoped_row)
         detail_html, html_withheld, html_truncated = _detail_html(scoped_row)
         notices, notices_withheld = _notice_items((row, *branches))
-        role_images, image_withheld = coupang_images(row, self.channel)
+        role_images, image_withheld, images_truncated = coupang_images_with_truncation(
+            row, self.channel
+        )
         root_images, root_withheld = _root_content_images(row)
         image_withheld = image_withheld or root_withheld
-        role_images = unique_images([*role_images, *root_images])
-        image_refs = tuple(
-            dict.fromkeys(
-                (*coupang_image_refs(row, self.channel), *_root_content_refs(root_images))
-            )
+        role_images, merged_truncated = bounded_role_images([*role_images, *root_images])
+        image_refs, refs_truncated = bounded_role_refs(
+            (*coupang_image_refs(row, self.channel), *_root_content_refs(root_images))
         )
+        images_truncated = images_truncated or merged_truncated or refs_truncated
         images = tuple(dict.fromkeys(image.url for image in role_images if image.role != "detail"))
         missing = []
         reasons = []
@@ -538,8 +541,10 @@ class CoupangProductsMixin:
             reasons.append("notice_values_withheld")
         if not images:
             missing.append("image_urls")
-        if image_withheld:
+        if image_withheld or images_truncated:
             missing.append("images")
+        if images_truncated:
+            reasons.append("image_count_truncated")
         status = ResultStatus.COMPLETE if not missing else ResultStatus.INCOMPLETE
         if missing:
             reasons.insert(0, "provider_content_fields_missing")

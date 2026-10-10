@@ -7,7 +7,18 @@
 - 공개 준비에서 `src/k12_commerce_mcp`의 Python 파일 **141개**가 회귀 시 고정한 SHA-256과 동일함을 대조했습니다.
 - 이 전체 회귀에는 K12의 로컬 공식 문서 스냅샷/별도 계약 문서 대조도 포함되므로, 원본을 미배포한 다른 PC에서 동일한 2,992건을 그대로 재현한다고 주장하지 않습니다.
 
-## 이번 공개 준비에서 직접 확인
+## 2026-10-10 동기화에서 직접 확인
+
+- 실제 MCP `list_tools`의 전체 등록 **146개**와 permission manifest 일치(`scripts/export_tool_catalog.py`, 제공자 호출 0).
+- READ 권한 142 / WRITE 권한 4. READ에는 무전송 차단 53개 등이 포함됩니다.
+- 전체 시험(K12의 Python 3.11 가상환경에서 `PYTHONPATH`로 공개 checkout의 `src`를 앞세워 실행, 불러온 패키지 경로가 checkout인지 먼저 확인): **3,371개 중 3,341 통과, 실패 30**. 실패 30개는 2026-09-30 공개본을 같은 방법으로 돌린 결과(2,992개 중 2,962 통과, 실패 30)와 이름까지 같습니다.
+  - 28개: 공개하지 않은 K12 내부 계약 문서(네이버 공식 읽기 계약, 3채널 작업 목록)가 없어서 실패합니다.
+  - 2개: `tests/test_stdio_e2e.py`가 checkout 안의 `.venv/bin/k12-commerce-mcp-mock`을 찾는데, 시험한 자리에 가상환경이 없어 실패합니다. `uv sync`로 만든 checkout에서는 이 파일이 생깁니다.
+- `ruff check src tests scripts` 통과.
+- `scripts/smoke_offline.py`: 오프라인 mock stdio에서 도구 146개 등록, `commerce_health_check`의 `status=complete`, `external_calls_enabled=false`·`credentials_enabled=false`·`database_enabled=false`.
+- 새로 들어간 줄 전부를 키·내부 주소·내부 경로·판매자 ID·연락처·실제 상품/주문 번호 꼴로 검사했습니다([PUBLISHING](PUBLISHING.md) 3절). 실제 값은 공개용 바꾸기로 지웠습니다.
+
+## 2026-09-30 공개 준비에서 직접 확인
 
 - 실제 MCP `list_tools`의 전체 등록 **136개**와 permission manifest 일치.
 - READ 권한 133 / WRITE 권한 3. READ에는 무전송 차단 53개 등이 포함됩니다.

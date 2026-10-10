@@ -1,18 +1,18 @@
 {
-  "registered_count": 136,
+  "registered_count": 146,
   "permission_counts": {
-    "read": 133,
-    "write": 3
+    "read": 142,
+    "write": 4
   },
   "classification_counts": {
     "무전송 차단": 53,
     "로컬 전용": 9,
-    "독립 제공자 READ": 56,
-    "이번 범위 밖": 2,
+    "독립 제공자 READ": 64,
+    "이번 범위 밖": 3,
     "공용 채널 조회": 9,
     "등록 참고정보 READ": 3,
     "이미지 READ": 1,
-    "건별 승인 필요 WRITE": 3
+    "건별 승인 필요 WRITE": 4
   },
   "complete_all_official_functions": false,
   "source": "offline MCP list_tools + permissions.py; classification is reviewed metadata, not a live probe",
@@ -1394,7 +1394,7 @@
     },
     {
       "name": "commerce_get_coupang_exchange_requests",
-      "description": "Read GET /v4/vendors/{vendorId}/exchangeRequests; never return customer data.",
+      "description": "Read GET /v4/vendors/{vendorId}/exchangeRequests; never return customer data.\n        created_at_from/created_at_to: local datetimes YYYY-MM-DDTHH:MM:SS (no\n        timezone suffix; date-only and minute-precision forms are rejected)\n        spanning a window shorter than 7 days. Claim ids are opaque digests.\n        ",
       "permission": "read",
       "classification": "독립 제공자 READ",
       "input_schema": {
@@ -3074,7 +3074,7 @@
     },
     {
       "name": "commerce_get_coupang_return_withdraw_requests",
-      "description": "Read GET /v4/vendors/{vendorId}/returnWithdrawRequests without customer data.",
+      "description": "Read GET /v4/vendors/{vendorId}/returnWithdrawRequests without customer data.\n        date_from/date_to: YYYY-MM-DD spanning at most 7 inclusive days.\n        Claim and item ids are opaque digests.\n        ",
       "permission": "read",
       "classification": "독립 제공자 READ",
       "input_schema": {
@@ -3595,6 +3595,246 @@
       }
     },
     {
+      "name": "commerce_get_elevenst_categories",
+      "description": "Read the unauthenticated 11st category list with leaf flags.",
+      "permission": "read",
+      "classification": "이번 범위 밖",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "title": "commerce_get_elevenst_categoriesArguments"
+      },
+      "output_schema": {
+        "$defs": {
+          "ElevenstLeafCategory": {
+            "additionalProperties": false,
+            "properties": {
+              "category_id": {
+                "pattern": "^[0-9]{1,20}$",
+                "title": "Category Id",
+                "type": "string"
+              },
+              "parent_category_id": {
+                "pattern": "^[0-9]{1,20}$",
+                "title": "Parent Category Id",
+                "type": "string"
+              },
+              "name": {
+                "maxLength": 300,
+                "minLength": 1,
+                "title": "Name",
+                "type": "string"
+              },
+              "level": {
+                "maximum": 9999,
+                "minimum": 1,
+                "title": "Level",
+                "type": "integer"
+              },
+              "is_leaf": {
+                "title": "Is Leaf",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "category_id",
+              "parent_category_id",
+              "name",
+              "level",
+              "is_leaf"
+            ],
+            "title": "ElevenstLeafCategory",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "complete",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "items": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ElevenstLeafCategory"
+            },
+            "maxItems": 50000,
+            "title": "Items",
+            "type": "array"
+          },
+          "total_count": {
+            "anyOf": [
+              {
+                "maximum": 50000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Total Count"
+          },
+          "reasons": {
+            "default": [],
+            "items": {
+              "enum": [
+                "not_configured",
+                "provider_read_unavailable",
+                "authentication_failed"
+              ],
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ElevenstCategoryList",
+        "type": "object"
+      }
+    },
+    {
+      "name": "commerce_get_elevenst_product",
+      "description": "Read one 11st seller product summary by product number.",
+      "permission": "read",
+      "classification": "독립 제공자 READ",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "product_no": {
+            "pattern": "^[1-9][0-9]{0,19}$",
+            "title": "Product No",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_no"
+        ],
+        "title": "commerce_get_elevenst_productArguments"
+      },
+      "output_schema": {
+        "$defs": {
+          "ElevenstProductSummary": {
+            "additionalProperties": false,
+            "properties": {
+              "product_no": {
+                "pattern": "^[0-9]{1,20}$",
+                "title": "Product No",
+                "type": "string"
+              },
+              "sale_status_code": {
+                "anyOf": [
+                  {
+                    "pattern": "^[0-9]{3}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Sale Status Code"
+              },
+              "category_no": {
+                "anyOf": [
+                  {
+                    "pattern": "^[0-9]{1,20}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Category No"
+              },
+              "sale_price": {
+                "anyOf": [
+                  {
+                    "maximum": 999999999,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Sale Price"
+              },
+              "seller_product_code": {
+                "anyOf": [
+                  {
+                    "maxLength": 100,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Seller Product Code"
+              }
+            },
+            "required": [
+              "product_no"
+            ],
+            "title": "ElevenstProductSummary",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "complete",
+              "not_found",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "product": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ElevenstProductSummary"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "reasons": {
+            "default": [],
+            "items": {
+              "enum": [
+                "not_configured",
+                "provider_read_unavailable",
+                "authentication_failed"
+              ],
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ElevenstProductLookup",
+        "type": "object"
+      }
+    },
+    {
       "name": "commerce_get_elevenst_public_categories",
       "description": "Page public unauthenticated 11st category GETs; no seller data.",
       "permission": "read",
@@ -3798,8 +4038,703 @@
       }
     },
     {
+      "name": "commerce_get_elevenst_registered_defaults",
+      "description": "Most-used seller-policy values across our registered 11st products (GET 1620/1621).\n\n        product_nos: 11st product numbers (max 20); seller_product_codes: seller product\n        codes resolved by GET 1621 (max 10). 11st has no GET list of our own products, so\n        with neither argument nothing is called and sample_count is 0. Each field returns\n        {value, count, candidates, conflict}. Seller-published A/S and return text may carry\n        the company phone number; buyer data, addresses and HTML are never read.\n        ",
+      "permission": "read",
+      "classification": "독립 제공자 READ",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "product_nos": {
+            "default": [],
+            "items": {
+              "pattern": "^[1-9][0-9]{0,19}$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Product Nos",
+            "type": "array"
+          },
+          "seller_product_codes": {
+            "default": [],
+            "items": {
+              "pattern": "^[A-Za-z0-9_-]{1,40}$",
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Seller Product Codes",
+            "type": "array"
+          }
+        },
+        "title": "commerce_get_elevenst_registered_defaultsArguments"
+      },
+      "output_schema": {
+        "$defs": {
+          "ElevenstDeliveryDefaults": {
+            "additionalProperties": false,
+            "properties": {
+              "area_code": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "method_code": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "courier_code": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "send_close_template_no": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "fee_type": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "fee": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "free_threshold": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "pay_type": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "bundle": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "jeju_fee": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "island_fee": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "outbound_addr_seq": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "inbound_addr_seq": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "return_fee": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "exchange_fee": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              }
+            },
+            "title": "ElevenstDeliveryDefaults",
+            "type": "object"
+          },
+          "ElevenstFieldEvidence": {
+            "additionalProperties": false,
+            "description": "가장 많이 쓴 값 + 그 값을 쓴 상품 수. conflict=true 면 1·2위 수가 같다(대표님이 고른다).",
+            "properties": {
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ],
+                "title": "Value"
+              },
+              "count": {
+                "minimum": 1,
+                "title": "Count",
+                "type": "integer"
+              },
+              "candidates": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/ElevenstValueCount"
+                },
+                "maxItems": 5,
+                "title": "Candidates",
+                "type": "array"
+              },
+              "conflict": {
+                "default": false,
+                "title": "Conflict",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "value",
+              "count"
+            ],
+            "title": "ElevenstFieldEvidence",
+            "type": "object"
+          },
+          "ElevenstNoticeItemValue": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "pattern": "^[0-9]{1,20}$",
+                "title": "Code",
+                "type": "string"
+              },
+              "value": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "title": "Value",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "value"
+            ],
+            "title": "ElevenstNoticeItemValue",
+            "type": "object"
+          },
+          "ElevenstOriginDefaults": {
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "region_code": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ElevenstFieldEvidence"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              }
+            },
+            "title": "ElevenstOriginDefaults",
+            "type": "object"
+          },
+          "ElevenstRegisteredNotice": {
+            "additionalProperties": false,
+            "properties": {
+              "type_code": {
+                "pattern": "^[0-9]{1,20}$",
+                "title": "Type Code",
+                "type": "string"
+              },
+              "items": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/ElevenstNoticeItemValue"
+                },
+                "maxItems": 100,
+                "title": "Items",
+                "type": "array"
+              }
+            },
+            "required": [
+              "type_code"
+            ],
+            "title": "ElevenstRegisteredNotice",
+            "type": "object"
+          },
+          "ElevenstValueCount": {
+            "additionalProperties": false,
+            "properties": {
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ],
+                "title": "Value"
+              },
+              "count": {
+                "minimum": 1,
+                "title": "Count",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "value",
+              "count"
+            ],
+            "title": "ElevenstValueCount",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "complete",
+              "incomplete",
+              "unavailable",
+              "invalid_request"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "sample_count": {
+            "default": 0,
+            "maximum": 20,
+            "minimum": 0,
+            "title": "Sample Count",
+            "type": "integer"
+          },
+          "requested": {
+            "default": 0,
+            "maximum": 20,
+            "minimum": 0,
+            "title": "Requested",
+            "type": "integer"
+          },
+          "reasons": {
+            "default": [],
+            "items": {
+              "enum": [
+                "not_configured",
+                "authentication_failed",
+                "rate_limited",
+                "provider_read_unavailable",
+                "no_registered_product_numbers",
+                "product_not_found",
+                "partial_read",
+                "unsafe_value_withheld",
+                "invalid_request"
+              ],
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ElevenstRegisteredNotice"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "notice_agree_count": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Notice Agree Count",
+            "type": "integer"
+          },
+          "notice_type_candidates": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ElevenstValueCount"
+            },
+            "maxItems": 5,
+            "title": "Notice Type Candidates",
+            "type": "array"
+          },
+          "as_detail": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ElevenstFieldEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "return_exchange_detail": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ElevenstFieldEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "category_no": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ElevenstFieldEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "tax_code": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ElevenstFieldEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "minor_purchasable": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ElevenstFieldEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "beef_trace": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ElevenstFieldEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "raw_material_type": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ElevenstFieldEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "origin": {
+            "$ref": "#/$defs/ElevenstOriginDefaults",
+            "default": {
+              "type": null,
+              "region_code": null,
+              "name": null
+            }
+          },
+          "delivery": {
+            "$ref": "#/$defs/ElevenstDeliveryDefaults",
+            "default": {
+              "area_code": null,
+              "method_code": null,
+              "courier_code": null,
+              "send_close_template_no": null,
+              "fee_type": null,
+              "fee": null,
+              "free_threshold": null,
+              "pay_type": null,
+              "bundle": null,
+              "jeju_fee": null,
+              "island_fee": null,
+              "outbound_addr_seq": null,
+              "inbound_addr_seq": null,
+              "return_fee": null,
+              "exchange_fee": null
+            }
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ElevenstRegisteredDefaults",
+        "type": "object"
+      }
+    },
+    {
+      "name": "commerce_get_elevenst_registration_options",
+      "description": "Read 11st seller registration selectors; no address or contact data.",
+      "permission": "read",
+      "classification": "독립 제공자 READ",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "title": "commerce_get_elevenst_registration_optionsArguments"
+      },
+      "output_schema": {
+        "$defs": {
+          "ElevenstPlace": {
+            "additionalProperties": false,
+            "properties": {
+              "addr_seq": {
+                "pattern": "^[0-9]{1,20}$",
+                "title": "Addr Seq",
+                "type": "string"
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "maxLength": 100,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Name"
+              }
+            },
+            "required": [
+              "addr_seq"
+            ],
+            "title": "ElevenstPlace",
+            "type": "object"
+          },
+          "ElevenstSendCloseTemplate": {
+            "additionalProperties": false,
+            "properties": {
+              "template_no": {
+                "pattern": "^[0-9]{1,20}$",
+                "title": "Template No",
+                "type": "string"
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "maxLength": 100,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Name"
+              },
+              "send_type_code": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "01",
+                      "02",
+                      "03"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Send Type Code"
+              }
+            },
+            "required": [
+              "template_no"
+            ],
+            "title": "ElevenstSendCloseTemplate",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "complete",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "outbound_places": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ElevenstPlace"
+            },
+            "maxItems": 10000,
+            "title": "Outbound Places",
+            "type": "array"
+          },
+          "return_places": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ElevenstPlace"
+            },
+            "maxItems": 10000,
+            "title": "Return Places",
+            "type": "array"
+          },
+          "send_close_templates": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/ElevenstSendCloseTemplate"
+            },
+            "maxItems": 10000,
+            "title": "Send Close Templates",
+            "type": "array"
+          },
+          "reasons": {
+            "default": [],
+            "items": {
+              "enum": [
+                "not_configured",
+                "provider_read_unavailable",
+                "authentication_failed"
+              ],
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ElevenstRegistrationOptions",
+        "type": "object"
+      }
+    },
+    {
       "name": "commerce_get_fees",
-      "description": "Return only fee values actually reported by the marketplace API.",
+      "description": "Return only fee values actually reported by the marketplace API.\n\n        business_date (KST pay date) narrows the Naver commission read to that\n        day; other channels ignore it.\n        ",
       "permission": "read",
       "classification": "공용 채널 조회",
       "input_schema": {
@@ -3841,6 +4776,19 @@
             ],
             "default": null,
             "title": "Cursor"
+          },
+          "business_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Business Date"
           }
         },
         "required": [
@@ -4771,6 +5719,235 @@
       }
     },
     {
+      "name": "commerce_get_mall_listing_status",
+      "description": "몰 등록 상태 읽기 (RV-20261009 CONTRACT 3절) — 읽기 전용.\n\n        최신 상품 목록 최대 3쪽(쪽당 50)에서 artifact·product digest 또는\n        management_codes(토스만, 상세 GET 최대 20번)로 상품 하나를 찾아\n        2절 상태 낱말(on_sale·inspection_waiting·inspection_rejected·\n        not_on_sale·unknown)로 돌려준다. 상품 번호 원문은 나가지 않는다.\n        ",
+      "permission": "read",
+      "classification": "독립 제공자 READ",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "enum": [
+              "naver",
+              "toss_store"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "artifact_digests": {
+            "default": [],
+            "items": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Artifact Digests",
+            "type": "array"
+          },
+          "product_digests": {
+            "default": [],
+            "items": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Product Digests",
+            "type": "array"
+          },
+          "management_codes": {
+            "default": [],
+            "items": {
+              "maxLength": 100,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Management Codes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "channel"
+        ],
+        "title": "commerce_get_mall_listing_statusArguments"
+      },
+      "output_schema": {
+        "$defs": {
+          "MallListing": {
+            "additionalProperties": false,
+            "description": "2절 상태 낱말 + 몰 열거값만 — 원문 칸은 절대 싣지 않는다.",
+            "properties": {
+              "state": {
+                "enum": [
+                  "on_sale",
+                  "inspection_waiting",
+                  "inspection_rejected",
+                  "not_on_sale",
+                  "not_found",
+                  "unknown"
+                ],
+                "title": "State",
+                "type": "string"
+              },
+              "provider_status": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "maxProperties": 4,
+                "title": "Provider Status",
+                "type": "object"
+              },
+              "rejection_reasons": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/MallListingRejection"
+                },
+                "maxItems": 5,
+                "title": "Rejection Reasons",
+                "type": "array"
+              },
+              "last_inspection_requested_at": {
+                "anyOf": [
+                  {
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Last Inspection Requested At"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "title": "MallListing",
+            "type": "object"
+          },
+          "MallListingMatch": {
+            "additionalProperties": false,
+            "description": "Which lookup key found the listing; product number stays digested.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "management_code",
+                  "digest",
+                  "none"
+                ],
+                "title": "Kind",
+                "type": "string"
+              },
+              "product_digest": {
+                "anyOf": [
+                  {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Product Digest"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "title": "MallListingMatch",
+            "type": "object"
+          },
+          "MallListingRejection": {
+            "additionalProperties": false,
+            "description": "토스 rejectionReasons 의 title·message 만 — 같은 내용은 한 번, message 500자.",
+            "properties": {
+              "title": {
+                "maxLength": 300,
+                "minLength": 1,
+                "title": "Title",
+                "type": "string"
+              },
+              "message": {
+                "maxLength": 500,
+                "minLength": 1,
+                "title": "Message",
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "message"
+            ],
+            "title": "MallListingRejection",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "const": "1.0",
+            "default": "1.0",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "channel": {
+            "enum": [
+              "naver",
+              "toss_store"
+            ],
+            "title": "Channel",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "incomplete"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "match": {
+            "$ref": "#/$defs/MallListingMatch"
+          },
+          "listing": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MallListing"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "candidates_scanned": {
+            "minimum": 0,
+            "title": "Candidates Scanned",
+            "type": "integer"
+          },
+          "reasons": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Reasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "channel",
+          "status",
+          "match",
+          "candidates_scanned"
+        ],
+        "title": "MallListingStatusResult",
+        "type": "object"
+      }
+    },
+    {
       "name": "commerce_get_marketplace_categories",
       "description": "Return bounded canonical marketplace categories for registration.",
       "permission": "read",
@@ -5349,6 +6526,22 @@
                 "default": false,
                 "title": "Image Allowed",
                 "type": "boolean"
+              },
+              "option_group": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "sales_option",
+                      "search_option"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Option Group"
               }
             },
             "required": [
@@ -5835,7 +7028,7 @@
     },
     {
       "name": "commerce_get_naver_attribute_units",
-      "description": "Read one documented Naver reference GET with safe bounded projection.",
+      "description": "Read GET /v1/product-attributes/attribute-value-units; query must be omitted.",
       "permission": "read",
       "classification": "독립 제공자 READ",
       "input_schema": {
@@ -6218,7 +7411,7 @@
     },
     {
       "name": "commerce_get_naver_attribute_values",
-      "description": "Read one documented Naver reference GET with safe bounded projection.",
+      "description": "Read GET /v1/product-attributes/attribute-values; query = numeric categoryId (required).",
       "permission": "read",
       "classification": "독립 제공자 READ",
       "input_schema": {
@@ -6601,7 +7794,7 @@
     },
     {
       "name": "commerce_get_naver_attributes",
-      "description": "Read one documented Naver reference GET with safe bounded projection.",
+      "description": "Read GET /v1/product-attributes/attributes; query = numeric categoryId (required, e.g. from commerce_get_naver_subcategories).",
       "permission": "read",
       "classification": "독립 제공자 READ",
       "input_schema": {
@@ -6984,7 +8177,7 @@
     },
     {
       "name": "commerce_get_naver_brands",
-      "description": "Read one documented Naver reference GET with safe bounded projection.",
+      "description": "Read GET /v1/product-brands; query = brand name (required, 80 chars max).",
       "permission": "read",
       "classification": "독립 제공자 READ",
       "input_schema": {
@@ -7786,7 +8979,7 @@
     },
     {
       "name": "commerce_get_naver_channel_product",
-      "description": "read-channel-product-1-product GET /v2/products/channel-products/:channelProductNo.\n\n        Closed catalog projection only; no same-path mutations, contact or raw content.\n        ",
+      "description": "read-channel-product-1-product GET /v2/products/channel-products/:channelProductNo.\n\n        Closed catalog projection only; no same-path mutations, contact or raw content.\n        channelProductNo: positive int64; the digit-string external_product_id\n        from commerce_get_products is also accepted.\n        ",
       "permission": "read",
       "classification": "독립 제공자 READ",
       "input_schema": {
@@ -8686,7 +9879,7 @@
     },
     {
       "name": "commerce_get_naver_delivery_bundle_group",
-      "description": "Read GET /v1/product-delivery-info/bundle-groups/:deliveryBundleGroupId.\n        Operation: get-delivery-bundle-group-product.\n        ",
+      "description": "Read GET /v1/product-delivery-info/bundle-groups/:deliveryBundleGroupId.\n        Operation: get-delivery-bundle-group-product.\n        deliveryBundleGroupId: int64 id from commerce_get_naver_delivery_bundle_groups;\n        a digit string is also accepted.\n        ",
       "permission": "read",
       "classification": "독립 제공자 READ",
       "input_schema": {
@@ -10390,7 +11583,7 @@
     },
     {
       "name": "commerce_get_naver_manufacturers",
-      "description": "Read one documented Naver reference GET with safe bounded projection.",
+      "description": "Read GET /v1/product-manufacturers; query = manufacturer name (required, 80 chars max).",
       "permission": "read",
       "classification": "독립 제공자 READ",
       "input_schema": {
@@ -10773,7 +11966,7 @@
     },
     {
       "name": "commerce_get_naver_origin_area_by_name",
-      "description": "Read one documented Naver reference GET with safe bounded projection.",
+      "description": "Read GET /v1/product-origin-areas/query; query = origin area name (required).",
       "permission": "read",
       "classification": "독립 제공자 READ",
       "input_schema": {
@@ -11156,7 +12349,7 @@
     },
     {
       "name": "commerce_get_naver_origin_areas",
-      "description": "Read one documented Naver reference GET with safe bounded projection.",
+      "description": "Read GET /v1/product-origin-areas; query must be omitted.",
       "permission": "read",
       "classification": "독립 제공자 READ",
       "input_schema": {
@@ -11539,7 +12732,7 @@
     },
     {
       "name": "commerce_get_naver_origin_product",
-      "description": "read-origin-product-product GET /v2/products/origin-products/:originProductNo.\n\n        Closed catalog projection only; no same-path mutations, contact or raw content.\n        ",
+      "description": "read-origin-product-product GET /v2/products/origin-products/:originProductNo.\n\n        Closed catalog projection only; no same-path mutations, contact or raw content.\n        originProductNo: positive int64; a digit string is also accepted.\n        ",
       "permission": "read",
       "classification": "독립 제공자 READ",
       "input_schema": {
@@ -13993,6 +15186,92 @@
       }
     },
     {
+      "name": "commerce_get_naver_registration_defaults",
+      "description": "Registered Naver product's registration values for DOR defaults (read-only).\n\n        Exactly one of originProductNo / channelProductNo. A channel product number\n        (the id kept on orders and SKU links) is resolved to its origin product first.\n        Returns only origin area, minor purchase, notice type+items, A/S guide text,\n        the seller-registered A/S contact (as_telephone and the notice items\n        afterServiceDirector / customerServicePhoneNumber — company contact, CEO\n        2026-10-07), shipping/return address-book ids (numbers only) and delivery\n        fee policy. Never buyer data, other phone fields, or address text.\n        ",
+      "permission": "read",
+      "classification": "독립 제공자 READ",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "originProductNo": {
+            "default": null,
+            "title": "Originproductno",
+            "type": "integer"
+          },
+          "channelProductNo": {
+            "default": null,
+            "title": "Channelproductno",
+            "type": "integer"
+          }
+        },
+        "title": "commerce_get_naver_registration_defaultsArguments"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "channel": {
+            "const": "naver",
+            "default": "naver",
+            "title": "Channel",
+            "type": "string"
+          },
+          "operation_id": {
+            "const": "read-naver-registration-defaults",
+            "default": "read-naver-registration-defaults",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "complete",
+              "unavailable",
+              "invalid_request"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "reasons": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "origin_product_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Origin Product No"
+          },
+          "item": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Item"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "RegistrationDefaultsRead",
+        "type": "object"
+      }
+    },
+    {
       "name": "commerce_get_naver_restricted_tags",
       "description": "GET /v2/tags/restricted-tags (is-restrict-tags-product).\n\n        Blocked: query_array_encoding_unverified.\n        ",
       "permission": "read",
@@ -14826,7 +16105,7 @@
     },
     {
       "name": "commerce_get_naver_size_type",
-      "description": "get-size-type-vo-product GET /v1/product-sizes/:sizeTypeId; closed single object.",
+      "description": "get-size-type-vo-product GET /v1/product-sizes/:sizeTypeId; closed single object.\n        sizeTypeId: int64 id from commerce_get_naver_size_types;\n        a digit string is also accepted.\n        ",
       "permission": "read",
       "classification": "독립 제공자 READ",
       "input_schema": {
@@ -16223,7 +17502,7 @@
     },
     {
       "name": "commerce_get_naver_sub_origin_areas",
-      "description": "Read one documented Naver reference GET with safe bounded projection.",
+      "description": "Read GET /v1/product-origin-areas/sub-origin-areas; query = parent area code (optional).",
       "permission": "read",
       "classification": "독립 제공자 READ",
       "input_schema": {
@@ -18301,6 +19580,28 @@
                 "default": null,
                 "title": "Description Text"
               },
+              "detail_html": {
+                "anyOf": [
+                  {
+                    "maxLength": 100000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Detail Html"
+              },
+              "notices": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/ProductContentNotice"
+                },
+                "maxItems": 500,
+                "title": "Notices",
+                "type": "array"
+              },
               "image_urls": {
                 "default": [],
                 "items": {
@@ -18342,6 +19643,50 @@
               "source"
             ],
             "title": "ProductContent",
+            "type": "object"
+          },
+          "ProductContentNotice": {
+            "additionalProperties": false,
+            "description": "One provider notice entry; value stays null when absent or withheld.",
+            "properties": {
+              "category": {
+                "anyOf": [
+                  {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Category"
+              },
+              "name": {
+                "maxLength": 200,
+                "minLength": 1,
+                "title": "Name",
+                "type": "string"
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Value"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "title": "ProductContentNotice",
             "type": "object"
           },
           "ProductImage": {
@@ -19278,6 +20623,29 @@
                 ],
                 "default": null
               },
+              "notice": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/TossProductNotice"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "is_tax_free": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Is Tax Free"
+              },
               "naver_delivery_template": {
                 "anyOf": [
                   {
@@ -19299,6 +20667,24 @@
                   }
                 ],
                 "default": null
+              },
+              "unsupported_detail_api": {
+                "default": false,
+                "title": "Unsupported Detail Api",
+                "type": "boolean"
+              },
+              "unsupported_detail_reason": {
+                "anyOf": [
+                  {
+                    "maxLength": 200,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Unsupported Detail Reason"
               },
               "completeness": {
                 "$ref": "#/$defs/Completeness"
@@ -19397,7 +20783,7 @@
                 "items": {
                   "$ref": "#/$defs/ProductAttribute"
                 },
-                "maxItems": 30,
+                "maxItems": 50,
                 "title": "Attributes",
                 "type": "array"
               },
@@ -19672,6 +21058,77 @@
               "data_basis"
             ],
             "title": "SourceEvidence",
+            "type": "object"
+          },
+          "TossProductNotice": {
+            "additionalProperties": false,
+            "description": "Registered Toss notice (OPUS-4 워커 C): only Agent-safe item contents ride here.\n\nItems whose content fails the Agent-safety scan (e.g. a landline number in the\nA/S item) are not copied; their ids are listed in ``withheld_item_ids`` so a\ncaller knows the item exists and can fill it from another source.",
+            "properties": {
+              "category_code": {
+                "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                "title": "Category Code",
+                "type": "string"
+              },
+              "items": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/TossProductNoticeItem"
+                },
+                "maxItems": 100,
+                "title": "Items",
+                "type": "array"
+              },
+              "withheld_item_ids": {
+                "default": [],
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 100,
+                "title": "Withheld Item Ids",
+                "type": "array"
+              }
+            },
+            "required": [
+              "category_code"
+            ],
+            "title": "TossProductNotice",
+            "type": "object"
+          },
+          "TossProductNoticeItem": {
+            "additionalProperties": false,
+            "description": "One registered Toss notice item (상품정보제공고시) — id, title and the seller's content.",
+            "properties": {
+              "id": {
+                "minimum": 0,
+                "title": "Id",
+                "type": "integer"
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Title"
+              },
+              "content": {
+                "maxLength": 4000,
+                "minLength": 1,
+                "title": "Content",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "content"
+            ],
+            "title": "TossProductNoticeItem",
             "type": "object"
           },
           "TossRegistrationDeliveryPolicy": {
@@ -22526,6 +23983,298 @@
       }
     },
     {
+      "name": "commerce_get_toss_notice_categories",
+      "description": "Toss 상품정보제공고시 카테고리 코드 목록 (GET notices/category-codes).\n\n        items: [{category_code, name, first_category_name, second_category_name}].\n        ",
+      "permission": "read",
+      "classification": "독립 제공자 READ",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "title": "commerce_get_toss_notice_categoriesArguments"
+      },
+      "output_schema": {
+        "$defs": {
+          "TossNoticeCategory": {
+            "additionalProperties": false,
+            "properties": {
+              "category_code": {
+                "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                "title": "Category Code",
+                "type": "string"
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "maxLength": 300,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Name"
+              },
+              "first_category_name": {
+                "anyOf": [
+                  {
+                    "maxLength": 300,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "First Category Name"
+              },
+              "second_category_name": {
+                "anyOf": [
+                  {
+                    "maxLength": 300,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Second Category Name"
+              }
+            },
+            "required": [
+              "category_code"
+            ],
+            "title": "TossNoticeCategory",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "complete",
+              "incomplete",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "items": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/TossNoticeCategory"
+            },
+            "maxItems": 500,
+            "title": "Items",
+            "type": "array"
+          },
+          "skipped_rows": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Skipped Rows",
+            "type": "integer"
+          },
+          "reasons": {
+            "default": [],
+            "items": {
+              "enum": [
+                "not_configured",
+                "authentication_failed",
+                "rate_limited",
+                "invalid_request",
+                "provider_read_unavailable",
+                "invalid_provider_shape",
+                "rows_skipped"
+              ],
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "source": {
+            "const": "toss-shopping:notices/category-codes",
+            "default": "toss-shopping:notices/category-codes",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "TossNoticeCategoryList",
+        "type": "object"
+      }
+    },
+    {
+      "name": "commerce_get_toss_notice_items",
+      "description": "Toss 고시 항목 목록 for one category code (GET notices?categoryCode=).\n\n        items: [{notice_id, title, order, required, required_basis, default_hint}] — titles\n        only; content is the seller's to fill.\n        ",
+      "permission": "read",
+      "classification": "독립 제공자 READ",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "category_code": {
+            "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            "title": "Category Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "category_code"
+        ],
+        "title": "commerce_get_toss_notice_itemsArguments"
+      },
+      "output_schema": {
+        "$defs": {
+          "TossNoticeItemDescriptor": {
+            "additionalProperties": false,
+            "properties": {
+              "notice_id": {
+                "maximum": 9223372036854775807,
+                "minimum": 0,
+                "title": "Notice Id",
+                "type": "integer"
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "maxLength": 300,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Title"
+              },
+              "order": {
+                "anyOf": [
+                  {
+                    "maximum": 100000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Order"
+              },
+              "required": {
+                "default": true,
+                "title": "Required",
+                "type": "boolean"
+              },
+              "required_basis": {
+                "default": "toss_doc_all_items_required",
+                "enum": [
+                  "provider",
+                  "toss_doc_all_items_required"
+                ],
+                "title": "Required Basis",
+                "type": "string"
+              },
+              "default_hint": {
+                "anyOf": [
+                  {
+                    "maxLength": 300,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Default Hint"
+              }
+            },
+            "required": [
+              "notice_id"
+            ],
+            "title": "TossNoticeItemDescriptor",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "complete",
+              "incomplete",
+              "unavailable",
+              "invalid_request"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "category_code": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Category Code"
+          },
+          "items": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/TossNoticeItemDescriptor"
+            },
+            "maxItems": 200,
+            "title": "Items",
+            "type": "array"
+          },
+          "skipped_rows": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Skipped Rows",
+            "type": "integer"
+          },
+          "reasons": {
+            "default": [],
+            "items": {
+              "enum": [
+                "not_configured",
+                "authentication_failed",
+                "rate_limited",
+                "invalid_request",
+                "provider_read_unavailable",
+                "invalid_provider_shape",
+                "rows_skipped"
+              ],
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "source": {
+            "const": "toss-shopping:notices",
+            "default": "toss-shopping:notices",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "TossNoticeItemList",
+        "type": "object"
+      }
+    },
+    {
       "name": "commerce_get_toss_price_compare_products",
       "description": "Read seller price-comparison item IDs and safe labels, never HTML or URLs.",
       "permission": "read",
@@ -22668,6 +24417,131 @@
           "items"
         ],
         "title": "TossPriceComparePage",
+        "type": "object"
+      }
+    },
+    {
+      "name": "commerce_get_toss_registration_locations",
+      "description": "Toss 배송비 묶음 그룹·교환반품지 번호 (GET .../delivery-location/v2,\n        GET .../exchange-refund-location/v2).\n\n        Only {location_id, name, is_main} — never address, zip code or contact text.\n        ",
+      "permission": "read",
+      "classification": "독립 제공자 READ",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "title": "commerce_get_toss_registration_locationsArguments"
+      },
+      "output_schema": {
+        "$defs": {
+          "TossRegistrationLocation": {
+            "additionalProperties": false,
+            "properties": {
+              "location_id": {
+                "maximum": 9223372036854775807,
+                "minimum": 1,
+                "title": "Location Id",
+                "type": "integer"
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "maxLength": 300,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Name"
+              },
+              "is_main": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Is Main"
+              }
+            },
+            "required": [
+              "location_id"
+            ],
+            "title": "TossRegistrationLocation",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "complete",
+              "incomplete",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "delivery_locations": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/TossRegistrationLocation"
+            },
+            "maxItems": 1000,
+            "title": "Delivery Locations",
+            "type": "array"
+          },
+          "exchange_refund_locations": {
+            "default": [],
+            "items": {
+              "$ref": "#/$defs/TossRegistrationLocation"
+            },
+            "maxItems": 1000,
+            "title": "Exchange Refund Locations",
+            "type": "array"
+          },
+          "delivery_locations_has_more": {
+            "default": false,
+            "title": "Delivery Locations Has More",
+            "type": "boolean"
+          },
+          "exchange_refund_locations_has_more": {
+            "default": false,
+            "title": "Exchange Refund Locations Has More",
+            "type": "boolean"
+          },
+          "skipped_rows": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Skipped Rows",
+            "type": "integer"
+          },
+          "reasons": {
+            "default": [],
+            "items": {
+              "enum": [
+                "not_configured",
+                "authentication_failed",
+                "rate_limited",
+                "invalid_request",
+                "provider_read_unavailable",
+                "invalid_provider_shape",
+                "rows_skipped"
+              ],
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "TossRegistrationLocations",
         "type": "object"
       }
     },
@@ -24133,6 +26007,28 @@
                 "default": null,
                 "title": "Description Text"
               },
+              "detail_html": {
+                "anyOf": [
+                  {
+                    "maxLength": 100000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Detail Html"
+              },
+              "notices": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/ProductContentNotice"
+                },
+                "maxItems": 500,
+                "title": "Notices",
+                "type": "array"
+              },
               "image_urls": {
                 "default": [],
                 "items": {
@@ -24174,6 +26070,50 @@
               "source"
             ],
             "title": "ProductContent",
+            "type": "object"
+          },
+          "ProductContentNotice": {
+            "additionalProperties": false,
+            "description": "One provider notice entry; value stays null when absent or withheld.",
+            "properties": {
+              "category": {
+                "anyOf": [
+                  {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Category"
+              },
+              "name": {
+                "maxLength": 200,
+                "minLength": 1,
+                "title": "Name",
+                "type": "string"
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Value"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "title": "ProductContentNotice",
             "type": "object"
           },
           "ProductImage": {
@@ -28043,6 +29983,718 @@
       }
     },
     {
+      "name": "commerce_publish_elevenst_product",
+      "description": "Publish one approved canonical draft to 11st (euc-kr XML) and verify it by GET.",
+      "permission": "write",
+      "classification": "건별 승인 필요 WRITE",
+      "input_schema": {
+        "type": "object",
+        "$defs": {
+          "ElevenstApprovalEvidence": {
+            "additionalProperties": false,
+            "description": "11st registration approval evidence; ordering is enforced upstream.",
+            "properties": {
+              "external_publish_approval": {
+                "title": "External Publish Approval",
+                "type": "boolean"
+              },
+              "external_publish_approved_at": {
+                "format": "date-time",
+                "title": "External Publish Approved At",
+                "type": "string"
+              },
+              "artifact_digest": {
+                "pattern": "^[a-f0-9]{64}$",
+                "title": "Artifact Digest",
+                "type": "string"
+              },
+              "attempt_id": {
+                "maxLength": 200,
+                "minLength": 1,
+                "title": "Attempt Id",
+                "type": "string"
+              },
+              "project_id": {
+                "maxLength": 200,
+                "minLength": 1,
+                "title": "Project Id",
+                "type": "string"
+              },
+              "batch_id": {
+                "maxLength": 200,
+                "minLength": 1,
+                "title": "Batch Id",
+                "type": "string"
+              },
+              "version": {
+                "minimum": 1,
+                "title": "Version",
+                "type": "integer"
+              },
+              "effective_from": {
+                "format": "date-time",
+                "title": "Effective From",
+                "type": "string"
+              }
+            },
+            "required": [
+              "external_publish_approval",
+              "external_publish_approved_at",
+              "artifact_digest",
+              "attempt_id",
+              "project_id",
+              "batch_id",
+              "version",
+              "effective_from"
+            ],
+            "title": "ElevenstApprovalEvidence",
+            "type": "object"
+          },
+          "ElevenstCanonicalDraft": {
+            "additionalProperties": false,
+            "properties": {
+              "channel": {
+                "const": "11st",
+                "title": "Channel",
+                "type": "string"
+              },
+              "name": {
+                "maxLength": 100,
+                "minLength": 1,
+                "title": "Name",
+                "type": "string"
+              },
+              "category_no": {
+                "pattern": "^[1-9][0-9]{0,19}$",
+                "title": "Category No",
+                "type": "string"
+              },
+              "sale_price": {
+                "maximum": 999999990,
+                "minimum": 10,
+                "multipleOf": 10,
+                "title": "Sale Price",
+                "type": "integer"
+              },
+              "stock_quantity": {
+                "maximum": 99999999,
+                "minimum": 1,
+                "title": "Stock Quantity",
+                "type": "integer"
+              },
+              "tax_code": {
+                "enum": [
+                  "01",
+                  "02",
+                  "03"
+                ],
+                "title": "Tax Code",
+                "type": "string"
+              },
+              "minor_purchasable": {
+                "title": "Minor Purchasable",
+                "type": "boolean"
+              },
+              "brand": {
+                "maxLength": 100,
+                "minLength": 1,
+                "title": "Brand",
+                "type": "string"
+              },
+              "product_status": {
+                "const": "01",
+                "title": "Product Status",
+                "type": "string"
+              },
+              "images": {
+                "items": {
+                  "pattern": "^https://k12-server\\.example\\.ts\\.net/11st/[a-f0-9]{32,64}\\.(?:jpg|png|webp)$",
+                  "type": "string"
+                },
+                "maxItems": 4,
+                "minItems": 1,
+                "title": "Images",
+                "type": "array"
+              },
+              "detail_html": {
+                "minLength": 1,
+                "title": "Detail Html",
+                "type": "string"
+              },
+              "option_title": {
+                "anyOf": [
+                  {
+                    "maxLength": 25,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Option Title"
+              },
+              "options": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "$ref": "#/$defs/ElevenstDraftOption"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Options"
+              },
+              "discount_amount": {
+                "anyOf": [
+                  {
+                    "maximum": 999999990,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Discount Amount"
+              },
+              "raw_material_type": {
+                "enum": [
+                  "01",
+                  "02",
+                  "03",
+                  "04",
+                  "05"
+                ],
+                "title": "Raw Material Type",
+                "type": "string"
+              },
+              "origin_type": {
+                "enum": [
+                  "01",
+                  "02",
+                  "03"
+                ],
+                "title": "Origin Type",
+                "type": "string"
+              },
+              "origin_region_code": {
+                "anyOf": [
+                  {
+                    "pattern": "^[0-9A-Za-z]{1,20}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Origin Region Code"
+              },
+              "origin_name": {
+                "anyOf": [
+                  {
+                    "maxLength": 50,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Origin Name"
+              },
+              "beef_trace": {
+                "enum": [
+                  "01",
+                  "02",
+                  "03"
+                ],
+                "title": "Beef Trace",
+                "type": "string"
+              },
+              "cert_groups": {
+                "items": {
+                  "$ref": "#/$defs/ElevenstDraftCertGroup"
+                },
+                "maxItems": 4,
+                "minItems": 1,
+                "title": "Cert Groups",
+                "type": "array"
+              },
+              "notice": {
+                "$ref": "#/$defs/ElevenstDraftNotice"
+              },
+              "delivery": {
+                "$ref": "#/$defs/ElevenstDraftDelivery"
+              },
+              "as_detail": {
+                "minLength": 1,
+                "title": "As Detail",
+                "type": "string"
+              },
+              "return_exchange_detail": {
+                "minLength": 1,
+                "title": "Return Exchange Detail",
+                "type": "string"
+              },
+              "seller_product_code": {
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9_:\\-]{1,40}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Seller Product Code"
+              }
+            },
+            "required": [
+              "channel",
+              "name",
+              "category_no",
+              "sale_price",
+              "stock_quantity",
+              "tax_code",
+              "minor_purchasable",
+              "brand",
+              "product_status",
+              "images",
+              "detail_html",
+              "raw_material_type",
+              "origin_type",
+              "beef_trace",
+              "cert_groups",
+              "notice",
+              "delivery",
+              "as_detail",
+              "return_exchange_detail"
+            ],
+            "title": "ElevenstCanonicalDraft",
+            "type": "object"
+          },
+          "ElevenstDraftCert": {
+            "additionalProperties": false,
+            "properties": {
+              "type_code": {
+                "pattern": "^[0-9]{3}$",
+                "title": "Type Code",
+                "type": "string"
+              },
+              "key": {
+                "maxLength": 100,
+                "title": "Key",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type_code",
+              "key"
+            ],
+            "title": "ElevenstDraftCert",
+            "type": "object"
+          },
+          "ElevenstDraftCertGroup": {
+            "additionalProperties": false,
+            "properties": {
+              "group_type": {
+                "enum": [
+                  "01",
+                  "02",
+                  "03",
+                  "04"
+                ],
+                "title": "Group Type",
+                "type": "string"
+              },
+              "target_code": {
+                "enum": [
+                  "01",
+                  "02",
+                  "03",
+                  "04",
+                  "05"
+                ],
+                "title": "Target Code",
+                "type": "string"
+              },
+              "exemption_code": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "02",
+                      "03"
+                    ],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Exemption Code"
+              },
+              "certs": {
+                "items": {
+                  "$ref": "#/$defs/ElevenstDraftCert"
+                },
+                "maxItems": 100,
+                "minItems": 1,
+                "title": "Certs",
+                "type": "array"
+              }
+            },
+            "required": [
+              "group_type",
+              "target_code",
+              "certs"
+            ],
+            "title": "ElevenstDraftCertGroup",
+            "type": "object"
+          },
+          "ElevenstDraftDelivery": {
+            "additionalProperties": false,
+            "properties": {
+              "area_code": {
+                "enum": [
+                  "01",
+                  "02"
+                ],
+                "title": "Area Code",
+                "type": "string"
+              },
+              "method_code": {
+                "const": "01",
+                "title": "Method Code",
+                "type": "string"
+              },
+              "courier_code": {
+                "anyOf": [
+                  {
+                    "pattern": "^[0-9]{5}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Courier Code"
+              },
+              "send_close_template_no": {
+                "anyOf": [
+                  {
+                    "pattern": "^[0-9]{1,20}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Send Close Template No"
+              },
+              "fee_type": {
+                "enum": [
+                  "01",
+                  "02",
+                  "03"
+                ],
+                "title": "Fee Type",
+                "type": "string"
+              },
+              "fee": {
+                "anyOf": [
+                  {
+                    "maximum": 1000000,
+                    "minimum": 0,
+                    "multipleOf": 10,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Fee"
+              },
+              "free_threshold": {
+                "anyOf": [
+                  {
+                    "maximum": 100000000,
+                    "minimum": 1,
+                    "multipleOf": 10,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Free Threshold"
+              },
+              "pay_type": {
+                "enum": [
+                  "01",
+                  "02",
+                  "03"
+                ],
+                "title": "Pay Type",
+                "type": "string"
+              },
+              "bundle": {
+                "title": "Bundle",
+                "type": "boolean"
+              },
+              "jeju_fee": {
+                "maximum": 1000000,
+                "minimum": 0,
+                "multipleOf": 10,
+                "title": "Jeju Fee",
+                "type": "integer"
+              },
+              "island_fee": {
+                "maximum": 1000000,
+                "minimum": 0,
+                "multipleOf": 10,
+                "title": "Island Fee",
+                "type": "integer"
+              },
+              "outbound_addr_seq": {
+                "pattern": "^[0-9]{1,20}$",
+                "title": "Outbound Addr Seq",
+                "type": "string"
+              },
+              "inbound_addr_seq": {
+                "pattern": "^[0-9]{1,20}$",
+                "title": "Inbound Addr Seq",
+                "type": "string"
+              },
+              "return_fee": {
+                "maximum": 1000000,
+                "minimum": 0,
+                "multipleOf": 10,
+                "title": "Return Fee",
+                "type": "integer"
+              },
+              "exchange_fee": {
+                "maximum": 1000000,
+                "minimum": 0,
+                "multipleOf": 10,
+                "title": "Exchange Fee",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "area_code",
+              "method_code",
+              "fee_type",
+              "pay_type",
+              "bundle",
+              "jeju_fee",
+              "island_fee",
+              "outbound_addr_seq",
+              "inbound_addr_seq",
+              "return_fee",
+              "exchange_fee"
+            ],
+            "title": "ElevenstDraftDelivery",
+            "type": "object"
+          },
+          "ElevenstDraftNotice": {
+            "additionalProperties": false,
+            "properties": {
+              "type_code": {
+                "pattern": "^[0-9]{1,20}$",
+                "title": "Type Code",
+                "type": "string"
+              },
+              "items": {
+                "items": {
+                  "$ref": "#/$defs/ElevenstDraftNoticeItem"
+                },
+                "maxItems": 100,
+                "minItems": 1,
+                "title": "Items",
+                "type": "array"
+              }
+            },
+            "required": [
+              "type_code",
+              "items"
+            ],
+            "title": "ElevenstDraftNotice",
+            "type": "object"
+          },
+          "ElevenstDraftNoticeItem": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "pattern": "^[0-9]{1,20}$",
+                "title": "Code",
+                "type": "string"
+              },
+              "value": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "title": "Value",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "value"
+            ],
+            "title": "ElevenstDraftNoticeItem",
+            "type": "object"
+          },
+          "ElevenstDraftOption": {
+            "additionalProperties": false,
+            "properties": {
+              "value": {
+                "maxLength": 25,
+                "minLength": 1,
+                "title": "Value",
+                "type": "string"
+              },
+              "stock_quantity": {
+                "maximum": 99999999,
+                "minimum": 0,
+                "title": "Stock Quantity",
+                "type": "integer"
+              },
+              "seller_stock_code": {
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9_-]{1,50}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Seller Stock Code"
+              },
+              "price_before_discount": {
+                "anyOf": [
+                  {
+                    "maximum": 999999990,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Price Before Discount"
+              },
+              "sale_price": {
+                "anyOf": [
+                  {
+                    "maximum": 999999990,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Sale Price"
+              }
+            },
+            "required": [
+              "value",
+              "stock_quantity"
+            ],
+            "title": "ElevenstDraftOption",
+            "type": "object"
+          }
+        },
+        "properties": {
+          "draft": {
+            "$ref": "#/$defs/ElevenstCanonicalDraft"
+          },
+          "approval": {
+            "$ref": "#/$defs/ElevenstApprovalEvidence"
+          },
+          "idempotency_key": {
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "draft",
+          "approval",
+          "idempotency_key"
+        ],
+        "title": "commerce_publish_elevenst_productArguments"
+      },
+      "output_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "published",
+              "pending_verification",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "receipt_verified": {
+            "title": "Receipt Verified",
+            "type": "boolean"
+          },
+          "product_digest": {
+            "anyOf": [
+              {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Product Digest"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "status",
+          "receipt_verified"
+        ],
+        "title": "ElevenstPublishResult",
+        "type": "object"
+      }
+    },
+    {
       "name": "commerce_publish_naver_product",
       "description": "Publish one DOR-approved canonical draft to Naver and verify it by GET.",
       "permission": "write",
@@ -28212,6 +30864,74 @@
                 "pattern": "^[a-f0-9]{64}$",
                 "title": "Image Sha256",
                 "type": "string"
+              },
+              "detail_blocks": {
+                "items": {
+                  "$ref": "#/$defs/NaverDetailBlock"
+                },
+                "maxItems": 80,
+                "title": "Detail Blocks",
+                "type": "array"
+              },
+              "detail_images": {
+                "items": {
+                  "$ref": "#/$defs/NaverDetailImage"
+                },
+                "maxItems": 40,
+                "title": "Detail Images",
+                "type": "array"
+              },
+              "optional_images": {
+                "items": {
+                  "$ref": "#/$defs/NaverDetailImage"
+                },
+                "maxItems": 9,
+                "title": "Optional Images",
+                "type": "array"
+              },
+              "option_title": {
+                "anyOf": [
+                  {
+                    "maxLength": 100,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Option Title"
+              },
+              "options": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "$ref": "#/$defs/NaverDraftOption"
+                    },
+                    "maxItems": 300,
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Options"
+              },
+              "discount_amount": {
+                "anyOf": [
+                  {
+                    "maximum": 10000000,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Discount Amount"
               }
             },
             "required": [
@@ -28233,6 +30953,143 @@
               "image_sha256"
             ],
             "title": "NaverCanonicalDraft",
+            "type": "object"
+          },
+          "NaverDetailBlock": {
+            "additionalProperties": false,
+            "description": "One block of the DOR-edited detail body.\n\nA text section or one detail image (index into detail_images).",
+            "properties": {
+              "type": {
+                "enum": [
+                  "text",
+                  "image"
+                ],
+                "title": "Type",
+                "type": "string"
+              },
+              "heading": {
+                "anyOf": [
+                  {
+                    "maxLength": 60,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Heading"
+              },
+              "text": {
+                "anyOf": [
+                  {
+                    "maxLength": 4000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Text"
+              },
+              "image_index": {
+                "anyOf": [
+                  {
+                    "maximum": 39,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Image Index"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "title": "NaverDetailBlock",
+            "type": "object"
+          },
+          "NaverDetailImage": {
+            "additionalProperties": false,
+            "description": "One approved local image used inside the detail body.\n\nSame evidence rules as the representative image.",
+            "properties": {
+              "storage_ref": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$",
+                "title": "Storage Ref",
+                "type": "string"
+              },
+              "mime_type": {
+                "enum": [
+                  "image/jpeg",
+                  "image/png",
+                  "image/gif",
+                  "image/bmp"
+                ],
+                "title": "Mime Type",
+                "type": "string"
+              },
+              "byte_size": {
+                "maximum": 6291456,
+                "minimum": 1,
+                "title": "Byte Size",
+                "type": "integer"
+              },
+              "sha256": {
+                "pattern": "^[a-f0-9]{64}$",
+                "title": "Sha256",
+                "type": "string"
+              }
+            },
+            "required": [
+              "storage_ref",
+              "mime_type",
+              "byte_size",
+              "sha256"
+            ],
+            "title": "NaverDetailImage",
+            "type": "object"
+          },
+          "NaverDraftOption": {
+            "additionalProperties": false,
+            "description": "옵션 조합 하나: 값 이름·재고·할인 전 가격·판매가.",
+            "properties": {
+              "value": {
+                "maxLength": 200,
+                "minLength": 1,
+                "title": "Value",
+                "type": "string"
+              },
+              "stock_quantity": {
+                "maximum": 99999999,
+                "minimum": 0,
+                "title": "Stock Quantity",
+                "type": "integer"
+              },
+              "price_before_discount": {
+                "maximum": 999999990,
+                "minimum": 0,
+                "title": "Price Before Discount",
+                "type": "integer"
+              },
+              "sale_price": {
+                "maximum": 999999990,
+                "minimum": 0,
+                "title": "Sale Price",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "value",
+              "stock_quantity",
+              "price_before_discount",
+              "sale_price"
+            ],
+            "title": "NaverDraftOption",
             "type": "object"
           }
         },
@@ -28508,6 +31365,20 @@
                 ],
                 "default": null,
                 "title": "Book Info"
+              },
+              "discount_amount": {
+                "anyOf": [
+                  {
+                    "maximum": 999999990,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Discount Amount"
               }
             },
             "required": [

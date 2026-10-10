@@ -56,6 +56,7 @@ class NaverDetailBlock(CanonicalModel):
 
 
 MAX_DETAIL_IMAGES = 40
+MAX_OPTIONAL_IMAGES = 9
 
 # 원상품 정보 구조체 문서: discountMethod.value 는 1~10,000,000.
 _DISCOUNT_VALUE_MAX = 10_000_000
@@ -147,6 +148,11 @@ class NaverCanonicalDraft(CanonicalModel):
     detail_images: list[NaverDetailImage] = Field(
         default_factory=list, max_length=MAX_DETAIL_IMAGES
     )
+    # 옵션 사진을 추가 사진으로 함께 올리기(대표님 2026-10-10 NOI).
+    # 비어 있으면 예전과 같은 등록 내용·승인 증빙
+    optional_images: list[NaverDetailImage] = Field(
+        default_factory=list, max_length=MAX_OPTIONAL_IMAGES
+    )
     # 옵션 조합형 가격. options 가 있으면 몰에 올라가는 salePrice 는 할인 전 가격이 가장 낮은
     # 옵션의 할인 전 가격이고, 옛 입력(가격 하나)은 options 없이 그대로 호환된다.
     option_title: str | None = Field(default=None, min_length=1, max_length=100)
@@ -158,7 +164,7 @@ class NaverCanonicalDraft(CanonicalModel):
         # 고친 상세 본문이 없으면 승인 증빙(digest)이 예전과 같아야 한다 — 빈 칸은 내보내지 않는다.
         data = handler(self)
         if isinstance(data, dict):
-            for key in ("detail_blocks", "detail_images", "options"):
+            for key in ("detail_blocks", "detail_images", "optional_images", "options"):
                 if not data.get(key):
                     data.pop(key, None)
             for key in ("option_title", "discount_amount"):
@@ -205,6 +211,15 @@ class NaverCanonicalDraft(CanonicalModel):
             raise ValueError(_OPTION_DISCOUNT_MISMATCH)
         if self.discount_amount is not None and self.discount_amount != discounts.pop():
             raise ValueError("discount_amount does not match the option discount")
+        return self
+
+    @model_validator(mode="after")
+    def _optional_images_unique(self) -> NaverCanonicalDraft:
+        hashes = [item.sha256 for item in self.optional_images]
+        if len(set(hashes)) != len(hashes):
+            raise ValueError("optional images must be unique")
+        if self.image_sha256 in hashes:
+            raise ValueError("optional image repeats the representative image")
         return self
 
 
@@ -264,49 +279,76 @@ class NaverProductPublisher:
             raise ValueError("asset evidence does not match the file")
         return body
 
-    async def _detail_content(self, draft: NaverCanonicalDraft) -> str:
-        if not draft.detail_blocks:
-            return draft.detail_content
-        bodies = [
-            self._read_file(item.storage_ref, item.byte_size, item.sha256)
-            for item in draft.detail_images
-        ]
-        urls: list[str] = []
+    async def _upload_image_batches(
+        self, entries: list[tuple[str, str, bytes]], *, error: str
+    ) -> list[str]:
         # CTO 2026-10-08 (19:16 네이버 HTTP 400): 네이버 공식 답변
         #   (commerce-api discussions #1136·#2473) — 사진 올리기 API 는 용량 제한이
         #   있다(파일 10MB 초과 거절, 한 번에 보내는 합계도 10MB 안팎).
         #   할로윈 상세 사진 4장(12.3MB)을 한 번에 보냈다.
         #   이제 10장 이하·합계 9MB 이하로 나눠 보낸다(같은 사진·같은 순서).
         batches: list[list[int]] = []
-        for index, body in enumerate(bodies):
+        for index, (_, _, body) in enumerate(entries):
             if (
                 not batches
                 or len(batches[-1]) >= 10
-                or sum(len(bodies[i]) for i in batches[-1]) + len(body) > _UPLOAD_BATCH_MAX_BYTES
+                or sum(len(entries[i][2]) for i in batches[-1]) + len(body)
+                > _UPLOAD_BATCH_MAX_BYTES
             ):
                 batches.append([])
             batches[-1].append(index)
+        urls: list[str] = []
         for batch in batches:
-            chunk = tuple(
-                (draft.detail_images[i].storage_ref, draft.detail_images[i].mime_type, bodies[i])
-                for i in batch
-            )
+            chunk = tuple(entries[i] for i in batch)
             uploaded = await self._client.upload_product_images(chunk)
             if len(uploaded) != len(chunk) or not all(
                 url.startswith("https://shop-phinf.pstatic.net/") for url in uploaded
             ):
-                raise ValueError("Naver detail image upload response is incomplete")
+                raise ValueError(error)
             urls.extend(uploaded)
+        return urls
+
+    async def _detail_content(self, draft: NaverCanonicalDraft) -> str:
+        if not draft.detail_blocks:
+            return draft.detail_content
+        entries = [
+            (
+                item.storage_ref,
+                item.mime_type,
+                self._read_file(item.storage_ref, item.byte_size, item.sha256),
+            )
+            for item in draft.detail_images
+        ]
+        urls = await self._upload_image_batches(
+            entries, error="Naver detail image upload response is incomplete"
+        )
         rendered = render_detail_html(draft.detail_blocks, urls)
         if len(rendered) > 100_000:
             raise ValueError("detail content is too long")
         return rendered
+
+    async def _optional_image_urls(self, draft: NaverCanonicalDraft) -> tuple[str, ...]:
+        if not draft.optional_images:
+            return ()
+        entries = [
+            (
+                item.storage_ref,
+                item.mime_type,
+                self._read_file(item.storage_ref, item.byte_size, item.sha256),
+            )
+            for item in draft.optional_images
+        ]
+        urls = await self._upload_image_batches(
+            entries, error="Naver optional image upload response is incomplete"
+        )
+        return tuple(urls)
 
     @staticmethod
     def _provider_payload(
         draft: NaverCanonicalDraft,
         image_url: str,
         detail_content: str | None = None,
+        optional_urls: tuple[str, ...] = (),
     ) -> dict[str, Any]:
         options = tuple(draft.options or ())
         # 대표 가격은 할인 전 가격이 가장 낮은 옵션의 할인 전 가격이다.
@@ -348,7 +390,7 @@ class NaverProductPublisher:
             "detailContent": detail_content if detail_content is not None else draft.detail_content,
             "images": {
                 "representativeImage": {"url": image_url},
-                "optionalImages": [],
+                "optionalImages": [{"url": url} for url in optional_urls],
             },
             "salePrice": base_price,
             "stockQuantity": draft.stock_quantity,
@@ -393,7 +435,10 @@ class NaverProductPublisher:
         if not image_url.startswith("https://shop-phinf.pstatic.net/"):
             raise ValueError("Naver image upload response is incomplete")
         detail_content = await self._detail_content(draft)
-        provider_payload = self._provider_payload(draft, image_url, detail_content)
+        optional_urls = await self._optional_image_urls(draft)
+        provider_payload = self._provider_payload(
+            draft, image_url, detail_content, optional_urls
+        )
         created = await self._client.create_product(provider_payload)
         origin_no = created.get("originProductNo") if isinstance(created, dict) else None
         channel_no = (

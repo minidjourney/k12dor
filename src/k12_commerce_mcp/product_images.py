@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from html.parser import HTMLParser
-from typing import Any
+from typing import Any, TypeVar
 
 from .adapters.base import AdapterInvalidResponseError
 from .image_assets import IMAGE_ASSETS, ImageAssetError
@@ -111,6 +112,42 @@ def unique_images(images: list[ProductImage]) -> tuple[ProductImage, ...]:
     return values
 
 
+_RoleItem = TypeVar("_RoleItem", ProductImage, ProductImageReference)
+
+# Representative and per-option images outrank shared detail shots: providers
+# repeat the same detail images under every option, so a positional cut would
+# drop whole roles while a role-ranked cut only sheds repeated detail entries.
+_ROLE_PRIORITY = {
+    "representative": 0,
+    "additional": 1,
+    "option": 1,
+    "unclassified": 2,
+    "detail": 3,
+}
+
+
+def _bounded_by_role(
+    items: tuple[_RoleItem, ...], limit: int
+) -> tuple[tuple[_RoleItem, ...], bool]:
+    if len(items) <= limit:
+        return items, False
+    chosen = sorted(range(len(items)), key=lambda i: (_ROLE_PRIORITY[items[i].role], i))[:limit]
+    chosen.sort()
+    return tuple(items[i] for i in chosen), True
+
+
+def bounded_role_images(
+    images: Iterable[ProductImage], limit: int = 100
+) -> tuple[tuple[ProductImage, ...], bool]:
+    return _bounded_by_role(tuple(dict.fromkeys(images)), limit)
+
+
+def bounded_role_refs(
+    refs: Iterable[ProductImageReference], limit: int = 100
+) -> tuple[tuple[ProductImageReference, ...], bool]:
+    return _bounded_by_role(tuple(dict.fromkeys(refs)), limit)
+
+
 def coupang_branches(row: dict[str, Any], channel: str) -> tuple[dict[str, Any], ...]:
     raw = row.get("items")
     if raw is None:
@@ -172,7 +209,7 @@ def coupang_image_url(raw: object) -> str | None:
 
 def _coupang_images(
     row: dict[str, Any], channel: str, *, for_references: bool = False
-) -> tuple[tuple[ProductImage, ...], bool]:
+) -> tuple[tuple[ProductImage, ...], bool, bool]:
     result: list[ProductImage] = []
     withheld = False
     for branch in coupang_branches(row, channel):
@@ -231,15 +268,23 @@ def _coupang_images(
                         result.append(
                             ProductImage(url=url, role="detail", external_option_id=option_id)
                         )
-    return unique_images(result), withheld
+    bounded, truncated = bounded_role_images(result)
+    return bounded, withheld, truncated
 
 
 def coupang_images(row: dict[str, Any], channel: str) -> tuple[tuple[ProductImage, ...], bool]:
+    images, withheld, _truncated = _coupang_images(row, channel)
+    return images, withheld
+
+
+def coupang_images_with_truncation(
+    row: dict[str, Any], channel: str
+) -> tuple[tuple[ProductImage, ...], bool, bool]:
     return _coupang_images(row, channel)
 
 
 def coupang_image_refs(row: dict[str, Any], channel: str) -> tuple[ProductImageReference, ...]:
-    source_images, _ = _coupang_images(row, channel, for_references=True)
+    source_images, _withheld, _truncated = _coupang_images(row, channel, for_references=True)
     refs = []
     for image in source_images:
         try:
@@ -251,4 +296,5 @@ def coupang_image_refs(row: dict[str, Any], channel: str) -> tuple[ProductImageR
                 asset_ref=reference, role=image.role, external_option_id=image.external_option_id
             )
         )
-    return tuple(dict.fromkeys(refs))
+    bounded, _truncated = bounded_role_refs(refs)
+    return bounded
